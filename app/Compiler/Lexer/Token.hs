@@ -24,6 +24,13 @@ data Token
   | Increment
   | Decrement
   | Tilde
+  | Caret
+  | Pipe
+  | Ampersand
+  | LessThan
+  | GreaterThan
+  | ShiftLeft
+  | ShiftRight
   | Semicolon
   | EndOfFile
   deriving (Show, Eq)
@@ -47,5 +54,12 @@ tokenToString token  = case token of
   Increment -> "++"
   Decrement -> "--"
   Tilde -> "~"
+  Caret -> "^"
+  Pipe -> "|"
+  Ampersand -> "&"
+  LessThan -> "<"
+  GreaterThan -> ">"
+  ShiftLeft -> "<<"
+  ShiftRight -> "<<"
   EndOfFile -> "<EOF>"
 

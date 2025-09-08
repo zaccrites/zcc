@@ -74,6 +74,11 @@ data AsmBinaryOp
   = AsmAdd
   | AsmSub
   | AsmMul
+  | AsmBitAnd
+  | AsmBitOr
+  | AsmBitXor
+  | AsmBitShiftLeft
+  | AsmBitShiftRight
   deriving (Show)
 
 
@@ -124,6 +129,11 @@ instance ShowAsm AsmBinaryOp where
   showAsm AsmAdd = "addl"
   showAsm AsmSub = "subl"
   showAsm AsmMul = "imull"
+  showAsm AsmBitAnd = "andl"
+  showAsm AsmBitOr = "orl"
+  showAsm AsmBitXor = "xorl"
+  showAsm AsmBitShiftLeft = "shll"
+  showAsm AsmBitShiftRight = "shrl"
 
 
 instance ShowAsm AsmInstruction where
@@ -215,6 +225,11 @@ genAsmInstructions (IrBinary op left right dest) =
     asmOp = case op of
       IrAdd -> AsmAdd
       IrSubtract -> AsmSub
+      IrBitwiseAnd -> AsmBitAnd
+      IrBitwiseOr -> AsmBitOr
+      IrBitwiseXor -> AsmBitXor
+      IrBitwiseShiftLeft -> AsmBitShiftLeft
+      IrBitwiseShiftRight -> AsmBitShiftRight
 
 
 data DesiredIDivOutput = Quotient | Remainder

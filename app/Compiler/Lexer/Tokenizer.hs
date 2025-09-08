@@ -54,6 +54,11 @@ getNextToken = do
       '/' -> give' Slash
       '%' -> give' Percent
       '~' -> give' Tilde
+      '^' -> give' Caret
+      '|' -> give' Pipe
+      '&' -> give' Ampersand
+      '<' -> tossNextChar >> readLessThanToken >>= give
+      '>' -> tossNextChar >> readGreaterThanToken >>= give
       c | isDigit c -> readIntLiteralToken >>= maybeGive
       c | isIdentifierHeadChar c -> readIdentifierOrKeyword >>= give
       c -> emitUnexpectedCharError c >> return Nothing
@@ -95,6 +100,7 @@ getNextToken = do
       let msg = "unexpected '" ++ (c:"'")
       emitLexerError msg
 
+
 readPlusToken :: Lexer Token
 readPlusToken = do
   nextChar <- peekNextChar
@@ -102,10 +108,27 @@ readPlusToken = do
     Just '+' -> tossNextChar >> return Increment
     _ -> return Plus
 
+
 readMinusToken :: Lexer Token
 readMinusToken = do
   nextChar <- peekNextChar
   case nextChar of
     Just '-' -> tossNextChar >> return Decrement
     _ -> return Minus
+
+
+readLessThanToken :: Lexer Token
+readLessThanToken = do
+  nextChar <- peekNextChar
+  case nextChar of
+    Just '<' -> tossNextChar >> return ShiftLeft
+    _ -> return LessThan
+
+
+readGreaterThanToken :: Lexer Token
+readGreaterThanToken = do
+  nextChar <- peekNextChar
+  case nextChar of
+    Just '>' -> tossNextChar >> return ShiftRight
+    _ -> return GreaterThan
 

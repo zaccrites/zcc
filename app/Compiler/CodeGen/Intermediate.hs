@@ -13,7 +13,7 @@ module Compiler.CodeGen.Intermediate (
 )
 where
 
-import Control.Monad.State (StateT (..), get, put, MonadState)
+import Control.Monad.State (StateT (..), get, put)
 import Control.Monad.Identity (Identity (..))
 
 import Compiler.Parser.Parser
@@ -41,6 +41,11 @@ data IrBinaryOp
   | IrMultiply
   | IrDivide
   | IrRemainder
+  | IrBitwiseAnd
+  | IrBitwiseOr
+  | IrBitwiseXor
+  | IrBitwiseShiftLeft
+  | IrBitwiseShiftRight
   deriving (Show)
 
 data IrReadValue
@@ -113,9 +118,12 @@ genExprIrInstructions (BinaryExpression op left right) = do
       Multiply -> IrMultiply
       Divide -> IrDivide
       Remainder -> IrRemainder
+      BitwiseAnd -> IrBitwiseAnd
+      BitwiseOr -> IrBitwiseOr
+      BitwiseXor -> IrBitwiseXor
+      BitwiseShiftLeft -> IrBitwiseShiftLeft
+      BitwiseShiftRight -> IrBitwiseShiftRight
 
-
--- genExprIrInstructions (BinaryExpression _ _ _) = return ([], IrConstant 0)
 
 getNewTempVarName :: IrGen String
 getNewTempVarName = do

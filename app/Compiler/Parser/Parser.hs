@@ -16,7 +16,7 @@ where
 
 import qualified Compiler.Lexer.Token as Tokens (Token(..))
 import Control.Monad.Writer (WriterT (..), MonadWriter (tell))
-import Control.Monad.State (StateT (..), get, put, MonadState)
+import Control.Monad.State (StateT (..), get, put)
 import Control.Monad.Identity (Identity (..))
 import Control.Monad.Trans.Maybe (MaybeT (..))
 
@@ -52,16 +52,27 @@ data BinaryOperator
   | Multiply
   | Divide
   | Remainder
+  | BitwiseShiftLeft
+  | BitwiseShiftRight
+  | BitwiseAnd
+  | BitwiseOr
+  | BitwiseXor
   deriving (Show)
 
 
+-- https://en.cppreference.com/w/c/language/operator_precedence.html
 getBinaryOperatorPrecedence :: BinaryOperator -> Int
 getBinaryOperatorPrecedence op = case op of
-  Add -> 45
-  Subtract -> 45
-  Multiply -> 50
-  Divide -> 50
-  Remainder -> 50
+  Multiply -> 130
+  Divide -> 130
+  Remainder -> 130
+  Add -> 120
+  Subtract -> 120
+  BitwiseShiftLeft -> 110
+  BitwiseShiftRight -> 110
+  BitwiseAnd -> 80
+  BitwiseOr -> 70
+  BitwiseXor -> 60
 
 isBinaryOperatorLeftAssociative :: BinaryOperator -> Bool
 isBinaryOperatorLeftAssociative op = True
@@ -136,6 +147,11 @@ getBinaryOperator token = case token of
   Tokens.Asterisk -> Just Multiply
   Tokens.Slash -> Just Divide
   Tokens.Percent -> Just Remainder
+  Tokens.Ampersand -> Just BitwiseAnd
+  Tokens.Pipe -> Just BitwiseOr
+  Tokens.Caret -> Just BitwiseXor
+  Tokens.ShiftLeft -> Just BitwiseShiftLeft
+  Tokens.ShiftRight -> Just BitwiseShiftRight
   _ -> Nothing
 
 
