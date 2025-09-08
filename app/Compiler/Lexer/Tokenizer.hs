@@ -1,4 +1,5 @@
-{-# LANGUAGE  OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 
 module Compiler.Lexer.Tokenizer (
   getTextTokens
@@ -36,6 +37,8 @@ getTextTokens' = do
 getNextToken :: Lexer (Maybe SourceToken)
 getNextToken = do
   consumeSpace
+  LexerState { location=location } <- get
+
   nextChar <- peekNextChar
   case nextChar of
     Nothing -> give EndOfFile
@@ -46,12 +49,22 @@ getNextToken = do
       '}' -> give' CloseBrace
       ';' -> give' Semicolon
       '+' -> give' Plus
-      '-' -> give' Minus
+      '-' -> tossNextChar >> readMinusToken >>= give
+      '~' -> give' Tilde
       c | isDigit c -> readIntLiteralToken >>= maybeGive
       c | isIdentifierHeadChar c -> readIdentifierOrKeyword >>= give
       c -> emitUnexpectedCharError c >> return Nothing
 
   where
+
+    -- TODO: fix the "off-by-one" error here, where the reported location
+    -- of the token will not be correct. It will point to the end of the token,
+    -- not the start of it, because withLoc happens after the position
+    -- has been moved up.
+    --
+    -- Probably it can be solved by just giving a SourceLocation
+    -- argument to the "give" function, rather than getting the current
+    -- location from withLoc
 
     withLoc :: Token -> Lexer SourceToken
     withLoc token = do
@@ -78,4 +91,12 @@ getNextToken = do
     emitUnexpectedCharError c = do
       let msg = "unexpected '" ++ (c:"'")
       emitLexerError msg
+
+
+readMinusToken :: Lexer Token
+readMinusToken = do
+  nextChar <- peekNextChar
+  case nextChar of
+    Just '-' -> tossNextChar >> return Decrement
+    _ -> return Minus
 

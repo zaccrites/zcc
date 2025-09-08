@@ -65,19 +65,20 @@ executable zcc
 
     -- Modules included in this executable, other than Main.
     other-modules:
+      Compiler.CodeGen.AssemblyX64
+      Compiler.CodeGen.Intermediate
       Compiler.Lexer.IdentifierLexing
       Compiler.Lexer.IntLexing
       Compiler.Lexer.Keyword
       Compiler.Lexer.Lexer
       Compiler.Lexer.LexerError
       Compiler.Lexer.LexerState
+      Compiler.Lexer.SourceToken
       Compiler.Lexer.Token
       Compiler.Lexer.Tokenizer
-      Compiler.Lexer.SourceToken
       Compiler.Parser.Parser
       Compiler.Parser.ParserError
       Compiler.SourceLocation
-      Compiler.CodeGen.AssemblyX64
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

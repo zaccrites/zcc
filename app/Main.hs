@@ -7,6 +7,7 @@ import Compiler.Lexer.Tokenizer
 import Compiler.Lexer.SourceToken
 import Compiler.Lexer.Token
 import Compiler.Parser.Parser
+import Compiler.CodeGen.Intermediate
 import Compiler.CodeGen.AssemblyX64
 
 -- enumerate :: Integral b => [a] -> [(b, a)]
@@ -56,14 +57,38 @@ doParseProgram tokens = do
     Just program' -> do
       print program'
       putStrLn "\n"
-      doCodeGen program'
+      doIrCodeGen program'
 
 
-doCodeGen :: Program -> IO ()
-doCodeGen program = do
-  let asmProgram = genProgramAsm program
+doIrCodeGen :: Program -> IO ()
+doIrCodeGen program = do
+  let irProgram = genIrProgram program
+
+  putStrLn "---------------------- IR Program ----------------------"
+  case irProgram of
+    IrProgram (IrFuncDef _ instructions) ->
+      forM_ (enumerate instructions) \(i, inst) -> putStrLn (show i ++ ": " ++ show inst)
+    _ -> print irProgram
+  putStrLn "\n"
+
+  doAsmCodeGen irProgram
+  --
+
+doAsmCodeGen :: IrProgram -> IO ()
+doAsmCodeGen program = do
+  let asmProgram = genAsmProgram program
+
+  putStrLn "---------------------- ASM Program ----------------------"
+  case asmProgram of
+    AsmProgram (AsmFuncDef _ _ instructions) ->
+      forM_ (enumerate instructions) \(i, inst) -> putStrLn (show i ++ ": " ++ show inst)
+    _ -> print asmProgram
+  putStrLn "\n"
+
+  putStrLn "---------------------- ASM Text ----------------------"
   let asmText = showAsm asmProgram
   putStrLn asmText
-  writeFile "out.s" asmText
+  putStrLn "\n"
 
+  writeFile "out.s" asmText
 

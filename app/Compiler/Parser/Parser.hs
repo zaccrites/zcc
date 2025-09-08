@@ -8,6 +8,7 @@ module Compiler.Parser.Parser (
   FuncDef (..),
   Statement (..),
   Expression (..),
+  UnaryOperator (..),
 )
 where
 
@@ -32,6 +33,12 @@ data Statement = ReturnStatement Expression
 
 data Expression
   = ConstantExpression Integer
+  | UnaryExpression UnaryOperator Expression
+  deriving (Show)
+
+data UnaryOperator
+  = Negate
+  | BitwiseComplement
   deriving (Show)
 
 
@@ -75,10 +82,29 @@ parseStatement = do
 
 parseExpression :: MaybeParser Expression
 parseExpression = do
-  token <- getNextToken
-  MaybeT . return $ case token of
-    SourceToken (Tokens.Constant value) _ -> Just (ConstantExpression value)
-    _ -> Nothing
+  SourceToken token _ <- getNextToken
+  case token of
+    Tokens.Constant value -> MaybeT . return . Just $ ConstantExpression value
+    Tokens.Minus -> parseUnaryExpression Negate
+    Tokens.Tilde -> parseUnaryExpression BitwiseComplement
+    Tokens.OpenParen -> parseParenthesizedExpression
+    _ -> MaybeT . return $ Nothing  -- TODO: emit parser error
+
+  -- MaybeT . return $ case token of
+  --   SourceToken (Tokens.Constant value) _ -> Just (ConstantExpression value)
+  --   _ -> Nothing
+
+parseUnaryExpression :: UnaryOperator -> MaybeParser Expression
+parseUnaryExpression op = do
+  expr <- parseExpression
+  MaybeT . return . Just $ UnaryExpression op expr
+
+
+parseParenthesizedExpression :: MaybeParser Expression
+parseParenthesizedExpression = do
+  expr <- parseExpression
+  expectToken Tokens.CloseParen
+  MaybeT . return . Just $ expr
 
 
 getIdentifier :: MaybeParser Identifier

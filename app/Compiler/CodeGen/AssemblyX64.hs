@@ -3,32 +3,66 @@
 
 module Compiler.CodeGen.AssemblyX64 (
   ShowAsm (..),
-  AsmProgram,
-  genProgramAsm,
+  AsmProgram (..),
+  AsmFuncDef (..),
+  genAsmProgram,
 )
 where
 
-import Compiler.Parser.Parser
+import Control.Monad.State (StateT (..), get, put)
+import Control.Monad.Identity (Identity (..))
+
+import Compiler.CodeGen.Intermediate
+import qualified Data.Map as Map
 
 
 type Identifier = String
+type StackOffset = Integer
 
 data AsmProgram = AsmProgram AsmFuncDef deriving (Show)
-data AsmFuncDef = AsmFuncDef Identifier [AsmInstruction] deriving (Show)
+data AsmFuncDef = AsmFuncDef Identifier Integer [AsmInstruction] deriving (Show)
 
 data AsmInstruction
-  = AsmMov AsmOperand AsmOperand
+  = AsmMov AsmReadOperand AsmWriteOperand
+  | AsmUnary AsmUnaryOp AsmReadOperand
+  | AsmAllocateStack StackOffset
   | AsmRet
   deriving (Show)
 
-data AsmOperand
-  = AsmRegister AsmReg
+data AsmReadOperand
+  = AsmReadRegister AsmReg
+  | AsmReadPseudoRegister Identifier
+  | AsmReadStack StackOffset
   | AsmImmVal Integer
   deriving (Show)
+
+data AsmWriteOperand
+  = AsmWriteRegister AsmReg
+  | AsmWritePseudoRegister Identifier
+  | AsmWriteStack StackOffset
+  deriving (Show)
+
+
+class ReadableAsmOperand a where
+  readAsmOperand :: a -> AsmReadOperand
+
+instance ReadableAsmOperand AsmReadOperand where
+  readAsmOperand = id
+
+instance ReadableAsmOperand AsmWriteOperand where
+  readAsmOperand (AsmWriteRegister reg) = AsmReadRegister reg
+  readAsmOperand (AsmWritePseudoRegister name) = AsmReadPseudoRegister name
+  readAsmOperand (AsmWriteStack offset) = AsmReadStack offset
+
 
 data AsmReg
   = AsmRegAX
   | AsmRegR10
+  deriving (Show)
+
+data AsmUnaryOp
+  = AsmNeg
+  | AsmNot
   deriving (Show)
 
 
@@ -45,45 +79,166 @@ instance ShowAsm AsmProgram where
 
 
 instance ShowAsm AsmFuncDef where
-  showAsm (AsmFuncDef name instructions) = unlines asmLines
+  showAsm (AsmFuncDef name stackSize instructions) = unlines asmLines
     where
       globalInfo = "    .globl " ++ name
       funcLabel = name ++ ":"
-      bodyLines = map(("    "++) . showAsm) instructions
+
+      preambleInstructions =
+        [ "pushq %rbp"
+        , "movq %rsp, %rbp"
+        , "subq $" ++ show stackSize ++ ", %rsp"
+        ]
+      implInstructions = map showAsm instructions
+      bodyInstructions = preambleInstructions ++ implInstructions
+      bodyLines = map ("    "++) bodyInstructions
+
       asmLines = [globalInfo, funcLabel] ++ bodyLines
 
 
 instance ShowAsm AsmReg where
   showAsm reg = case reg of
     AsmRegAX -> "%eax"
-    AsmRegR10 -> "TODO"
+    AsmRegR10 -> "%r10d"
+
+
+instance ShowAsm AsmUnaryOp where
+  showAsm AsmNot = "notl"
+  showAsm AsmNeg = "negl"
 
 
 instance ShowAsm AsmInstruction where
   showAsm inst = case inst of
-    -- AsmRet -> "mov rsp, rbp\n    pop rbp\n    ret"
-    AsmRet -> "ret"
+    AsmRet -> "movq %rbp, %rsp\n    popq %rbp\n    ret"
     AsmMov src dest -> "movl " ++ showAsm src ++ ", " ++ showAsm dest
+    AsmUnary op src -> showAsm op ++ " " ++ showAsm src
+    AsmAllocateStack offset -> "subq $" ++ show offset ++ ", %rsp"
 
-
-instance ShowAsm AsmOperand where
-  showAsm (AsmRegister reg) = showAsm reg
+instance ShowAsm AsmReadOperand where
+  showAsm (AsmReadRegister reg) = showAsm reg
   showAsm (AsmImmVal value) = '$' : show value
+  showAsm (AsmReadPseudoRegister name) = showAsmPseudoRegister name
+  showAsm (AsmReadStack offset) = showAsmStackOffset offset
+
+instance ShowAsm AsmWriteOperand where
+  showAsm (AsmWriteRegister reg) = showAsm reg
+  showAsm (AsmWritePseudoRegister name) = showAsmPseudoRegister name
+  showAsm (AsmWriteStack offset) = showAsmStackOffset offset
 
 
+showAsmStackOffset :: StackOffset -> String
+showAsmStackOffset offset = "-" ++ show offset ++ "(%rbp)"
+
+showAsmPseudoRegister :: Identifier -> String
+showAsmPseudoRegister name = "?(" ++ name ++ ")"
 
 
-genProgramAsm :: Program -> AsmProgram
-genProgramAsm (Program func) = AsmProgram $ genFuncDefAsm func
+genAsmProgram :: IrProgram -> AsmProgram
+genAsmProgram (IrProgram func) = AsmProgram $ genAsmFuncDef func
 
-genFuncDefAsm :: FuncDef -> AsmFuncDef
-genFuncDefAsm (FuncDef name stmt) = AsmFuncDef name (genStmtAsm stmt)
+genAsmFuncDef :: IrFuncDef -> AsmFuncDef
+genAsmFuncDef (IrFuncDef name instructions) =
+  let
+    rawAsmInstructions = concatMap genAsmInstructions instructions
+    (asmInstructions, stackSize) = replacePseudoRegisters rawAsmInstructions
+  in
+    AsmFuncDef name stackSize asmInstructions
 
-genStmtAsm :: Statement -> [AsmInstruction]
-genStmtAsm (ReturnStatement (ConstantExpression value)) =
-  [ AsmMov (AsmImmVal value) (AsmRegister AsmRegAX)
+
+genAsmInstructions :: IrInstruction -> [AsmInstruction]
+
+genAsmInstructions (IrReturn value) =
+  [ AsmMov (genAsmReadOperand value) (AsmWriteRegister AsmRegAX)
   , AsmRet
   ]
 
+genAsmInstructions (IrUnary op src dest) =
+  [ AsmMov asmSrc asmDest
+  , AsmUnary asmOp (readAsmOperand asmDest)
+  ]
+  where
+    asmSrc = genAsmReadOperand src
+    asmDest = genAsmWriteOperand dest
+    asmOp = case op of
+      IrComplement -> AsmNot
+      IrNegate -> AsmNeg
 
+
+genAsmReadOperand :: IrReadValue -> AsmReadOperand
+genAsmReadOperand (IrConstant value) = AsmImmVal value
+genAsmReadOperand (IrReadVar name) = AsmReadPseudoRegister name
+
+genAsmWriteOperand :: IrWriteValue -> AsmWriteOperand
+genAsmWriteOperand (IrWriteVar name) = AsmWritePseudoRegister name
+
+
+type PseudoRegReplacerState =
+  ( Map.Map Identifier StackOffset  -- assigned offsets
+  , StackOffset                     -- current max offset
+  )
+
+type PseudoRegReplacerT m = StateT PseudoRegReplacerState m
+type PseudoRegReplacer = PseudoRegReplacerT Identity
+
+
+replacePseudoRegisters :: [AsmInstruction] -> ([AsmInstruction], StackOffset)
+replacePseudoRegisters instructions = (outputInstructions, stackSize - 4)
+  where
+    initState = (Map.empty, 4)
+    (outputInstructions, (_, stackSize)) =
+      runIdentity $ runStateT (replacePseudoRegisters' instructions) initState
+
+replacePseudoRegisters' :: [AsmInstruction] -> PseudoRegReplacer [AsmInstruction]
+replacePseudoRegisters' [] = return []
+replacePseudoRegisters' (x:xs) = do
+  newInstructions <- f x
+  restInstructions <- replacePseudoRegisters' xs
+  return $ newInstructions ++ restInstructions
+  where
+    f :: AsmInstruction -> PseudoRegReplacer [AsmInstruction]
+
+    f (AsmMov (AsmReadPseudoRegister srcName) (AsmWritePseudoRegister destName)) = do
+      newSrc <- replaceReadPseudoReg srcName
+      newDest <- replaceWritePseudoReg destName
+      return
+        [ AsmMov newSrc (AsmWriteRegister AsmRegR10)
+        , AsmMov (AsmReadRegister AsmRegR10) newDest
+        ]
+
+    f (AsmMov (AsmReadPseudoRegister srcName) dest) = do
+      newSrc <- replaceReadPseudoReg srcName
+      return [AsmMov newSrc dest]
+
+    f (AsmMov src (AsmWritePseudoRegister destName)) = do
+      newDest <- replaceWritePseudoReg destName
+      return [AsmMov src newDest]
+
+    f (AsmUnary op (AsmReadPseudoRegister name)) = do
+      new <- replaceReadPseudoReg name
+      return [AsmUnary op new]
+
+    -- Otherwise, pass it through unchanged.
+    f instruction = return [instruction]
+
+
+replaceReadPseudoReg :: Identifier -> PseudoRegReplacer AsmReadOperand
+replaceReadPseudoReg name = do
+  offset <- assignPseudoRegStackOffset name
+  return $ AsmReadStack offset
+
+replaceWritePseudoReg :: Identifier -> PseudoRegReplacer AsmWriteOperand
+replaceWritePseudoReg name = do
+  offset <- assignPseudoRegStackOffset name
+  return $ AsmWriteStack offset
+
+assignPseudoRegStackOffset :: Identifier -> PseudoRegReplacer StackOffset
+assignPseudoRegStackOffset name = do
+  (assignments, maxOffset) <- get
+  case Map.lookup name assignments of
+    Just offset -> return offset
+    Nothing -> do
+      let assignments' = Map.insert name maxOffset assignments
+      let maxOffset' = maxOffset + 4
+      put (assignments', maxOffset')
+      return maxOffset
 

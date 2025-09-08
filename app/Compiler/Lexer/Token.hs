@@ -18,6 +18,8 @@ data Token
   | CloseBrace
   | Plus
   | Minus
+  | Decrement
+  | Tilde
   | Semicolon
   | EndOfFile
   deriving (Show, Eq)
@@ -35,5 +37,7 @@ tokenToString token  = case token of
   Semicolon -> ";"
   Plus -> "+"
   Minus -> "-"
+  Decrement -> "--"
+  Tilde -> "~"
   EndOfFile -> "<EOF>"
 
