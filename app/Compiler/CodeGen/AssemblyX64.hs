@@ -25,6 +25,9 @@ data AsmFuncDef = AsmFuncDef Identifier Integer [AsmInstruction] deriving (Show)
 data AsmInstruction
   = AsmMov AsmReadOperand AsmWriteOperand
   | AsmUnary AsmUnaryOp AsmReadOperand
+  | AsmBinary AsmBinaryOp AsmReadOperand AsmWriteOperand
+  | AsmIntDiv AsmReadOperand
+  | AsmConvertDoubleToQuad
   | AsmAllocateStack StackOffset
   | AsmRet
   deriving (Show)
@@ -57,12 +60,20 @@ instance ReadableAsmOperand AsmWriteOperand where
 
 data AsmReg
   = AsmRegAX
+  | AsmRegDX
   | AsmRegR10
+  | AsmRegR11
   deriving (Show)
 
 data AsmUnaryOp
   = AsmNeg
   | AsmNot
+  deriving (Show)
+
+data AsmBinaryOp
+  = AsmAdd
+  | AsmSub
+  | AsmMul
   deriving (Show)
 
 
@@ -99,12 +110,20 @@ instance ShowAsm AsmFuncDef where
 instance ShowAsm AsmReg where
   showAsm reg = case reg of
     AsmRegAX -> "%eax"
+    AsmRegDX -> "%edx"
     AsmRegR10 -> "%r10d"
+    AsmRegR11 -> "%r11d"
 
 
 instance ShowAsm AsmUnaryOp where
   showAsm AsmNot = "notl"
   showAsm AsmNeg = "negl"
+
+
+instance ShowAsm AsmBinaryOp where
+  showAsm AsmAdd = "addl"
+  showAsm AsmSub = "subl"
+  showAsm AsmMul = "imull"
 
 
 instance ShowAsm AsmInstruction where
@@ -113,6 +132,9 @@ instance ShowAsm AsmInstruction where
     AsmMov src dest -> "movl " ++ showAsm src ++ ", " ++ showAsm dest
     AsmUnary op src -> showAsm op ++ " " ++ showAsm src
     AsmAllocateStack offset -> "subq $" ++ show offset ++ ", %rsp"
+    AsmBinary op src dest -> showAsm op ++ " " ++ showAsm src ++ ", " ++ showAsm dest
+    AsmConvertDoubleToQuad -> "cdq"
+    AsmIntDiv src -> "idivl " ++ showAsm src
 
 instance ShowAsm AsmReadOperand where
   showAsm (AsmReadRegister reg) = showAsm reg
@@ -162,6 +184,74 @@ genAsmInstructions (IrUnary op src dest) =
     asmOp = case op of
       IrComplement -> AsmNot
       IrNegate -> AsmNeg
+
+-- NOTE: imul does not allow memory addresses as its destination,
+-- so we have to write to a scratch register first.
+genAsmInstructions (IrBinary IrMultiply left right dest) =
+  [ AsmMov asmLeft scratchTarget
+  , AsmBinary AsmMul asmRight scratchTarget
+  , AsmMov (readAsmOperand scratchTarget) asmDest
+  ]
+  where
+    scratchTarget = AsmWriteRegister AsmRegR11
+    asmLeft = genAsmReadOperand left
+    asmRight = genAsmReadOperand right
+    asmDest = genAsmWriteOperand dest
+
+genAsmInstructions (IrBinary IrDivide left right dest) =
+  genAsmInstructionsIDivCommon Quotient left right dest
+
+genAsmInstructions (IrBinary IrRemainder left right dest) =
+  genAsmInstructionsIDivCommon Remainder left right dest
+
+genAsmInstructions (IrBinary op left right dest) =
+  [ AsmMov asmLeft asmDest
+  , AsmBinary asmOp asmRight asmDest
+  ]
+  where
+    asmLeft = genAsmReadOperand left
+    asmRight = genAsmReadOperand right
+    asmDest = genAsmWriteOperand dest
+    asmOp = case op of
+      IrAdd -> AsmAdd
+      IrSubtract -> AsmSub
+
+
+data DesiredIDivOutput = Quotient | Remainder
+
+-- NOTE: idiv only takes a single operand, which is the divisor.
+-- The divisor cannot be an immediate value. The 32-bit idiv instruction
+-- actually uses a 64-bit dividend, getting the 32 most-significant bits
+-- from EDX and the 32 least-significant bits from EAX.
+-- idiv then computes the quotient and remainder,
+-- storing them in EAX and EDX respectively.
+genAsmInstructionsIDivCommon :: DesiredIDivOutput -> IrReadValue -> IrReadValue -> IrWriteValue -> [AsmInstruction]
+genAsmInstructionsIDivCommon output dividend divisor dest =
+  -- NOTE: The scratch register is only needed if the divisor is a constant value.
+  -- FUTURE: de-duplicate this
+  case divisor of
+    IrConstant _ ->
+      [ AsmMov asmDivisor scratchTarget
+      , AsmMov asmDividend (AsmWriteRegister AsmRegAX)
+      , AsmConvertDoubleToQuad
+      , AsmIntDiv (readAsmOperand scratchTarget)
+      , AsmMov (AsmReadRegister outputSrcReg) asmDest
+      ]
+    _ ->
+      [ AsmMov asmDividend (AsmWriteRegister AsmRegAX)
+      , AsmConvertDoubleToQuad
+      , AsmIntDiv asmDivisor
+      , AsmMov (AsmReadRegister outputSrcReg) asmDest
+      ]
+  where
+    scratchTarget = AsmWriteRegister AsmRegR10
+    asmDividend = genAsmReadOperand dividend
+    asmDivisor = genAsmReadOperand divisor
+    asmDest = genAsmWriteOperand dest
+    outputSrcReg = case output of
+      Quotient -> AsmRegAX
+      Remainder -> AsmRegDX
+
 
 
 genAsmReadOperand :: IrReadValue -> AsmReadOperand
@@ -213,9 +303,30 @@ replacePseudoRegisters' (x:xs) = do
       newDest <- replaceWritePseudoReg destName
       return [AsmMov src newDest]
 
+    -- TODO: de-duplicate, since "AsmMov" and "AsmBinary op" cases are identical
+    f (AsmBinary op (AsmReadPseudoRegister srcName) (AsmWritePseudoRegister destName)) = do
+      newSrc <- replaceReadPseudoReg srcName
+      newDest <- replaceWritePseudoReg destName
+      return
+        [ AsmMov newSrc (AsmWriteRegister AsmRegR10)
+        , AsmBinary op (AsmReadRegister AsmRegR10) newDest
+        ]
+
+    f (AsmBinary op (AsmReadPseudoRegister srcName) dest) = do
+      newSrc <- replaceReadPseudoReg srcName
+      return [AsmBinary op newSrc dest]
+
+    f (AsmBinary op src (AsmWritePseudoRegister destName)) = do
+      newDest <- replaceWritePseudoReg destName
+      return [AsmBinary op src newDest]
+
     f (AsmUnary op (AsmReadPseudoRegister name)) = do
       new <- replaceReadPseudoReg name
       return [AsmUnary op new]
+
+    f (AsmIntDiv (AsmReadPseudoRegister name)) = do
+      new <- replaceReadPseudoReg name
+      return [AsmIntDiv new]
 
     -- Otherwise, pass it through unchanged.
     f instruction = return [instruction]

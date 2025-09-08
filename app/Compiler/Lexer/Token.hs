@@ -18,6 +18,10 @@ data Token
   | CloseBrace
   | Plus
   | Minus
+  | Asterisk
+  | Slash
+  | Percent
+  | Increment
   | Decrement
   | Tilde
   | Semicolon
@@ -37,6 +41,10 @@ tokenToString token  = case token of
   Semicolon -> ";"
   Plus -> "+"
   Minus -> "-"
+  Asterisk -> "*"
+  Slash -> "/"
+  Percent -> "%"
+  Increment -> "++"
   Decrement -> "--"
   Tilde -> "~"
   EndOfFile -> "<EOF>"

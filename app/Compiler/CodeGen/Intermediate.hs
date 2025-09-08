@@ -8,14 +8,13 @@ module Compiler.CodeGen.Intermediate (
   IrReadValue (..),
   IrWriteValue (..),
   IrUnaryOp (..),
+  IrBinaryOp (..),
   genIrProgram,
 )
 where
 
-import Control.Monad.Writer (WriterT (..))
 import Control.Monad.State (StateT (..), get, put, MonadState)
 import Control.Monad.Identity (Identity (..))
-import Control.Monad.Trans.Maybe (MaybeT (..))
 
 import Compiler.Parser.Parser
 
@@ -28,11 +27,20 @@ data IrFuncDef = IrFuncDef Identifier [IrInstruction] deriving (Show)
 data IrInstruction
   = IrReturn IrReadValue
   | IrUnary IrUnaryOp IrReadValue IrWriteValue
+  | IrBinary IrBinaryOp IrReadValue IrReadValue IrWriteValue
   deriving (Show)
 
 data IrUnaryOp
   = IrComplement
   | IrNegate
+  deriving (Show)
+
+data IrBinaryOp
+  = IrAdd
+  | IrSubtract
+  | IrMultiply
+  | IrDivide
+  | IrRemainder
   deriving (Show)
 
 data IrReadValue
@@ -46,7 +54,6 @@ data IrWriteValue
 
 
 
--- TODO: use writer monad to output instructions?
 type TempVarCounter = Integer
 
 type IrGenT m = StateT TempVarCounter m
@@ -76,6 +83,7 @@ genStmtIrInstructions (ReturnStatement expr) = do
 
 genExprIrInstructions :: Expression -> IrGen ([IrInstruction], IrReadValue)
 genExprIrInstructions (ConstantExpression value) = return ([], IrConstant value)
+
 genExprIrInstructions (UnaryExpression op expr) = do
   (innerInstructions, innerValue) <- genExprIrInstructions expr
   destName <- getNewTempVarName
@@ -88,6 +96,26 @@ genExprIrInstructions (UnaryExpression op expr) = do
       Negate -> IrNegate
       BitwiseComplement -> IrComplement
 
+-- FUTURE: skip right-hand side for short-circuited logical operators
+genExprIrInstructions (BinaryExpression op left right) = do
+  (innerInstructionsLeft, innerValueLeft) <- genExprIrInstructions left
+  (innerInstructionsRight, innerValueRight) <- genExprIrInstructions right
+  destName <- getNewTempVarName
+  let dest = IrWriteVar destName
+  let instructions = [IrBinary irOp innerValueLeft innerValueRight dest]
+  let allInstructions = concat [innerInstructionsLeft, innerInstructionsRight, instructions]
+  return (allInstructions, IrReadVar destName)
+
+  where
+    irOp = case op of
+      Add -> IrAdd
+      Subtract -> IrSubtract
+      Multiply -> IrMultiply
+      Divide -> IrDivide
+      Remainder -> IrRemainder
+
+
+-- genExprIrInstructions (BinaryExpression _ _ _) = return ([], IrConstant 0)
 
 getNewTempVarName :: IrGen String
 getNewTempVarName = do

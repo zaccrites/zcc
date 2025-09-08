@@ -9,19 +9,23 @@ module Compiler.Parser.Parser (
   Statement (..),
   Expression (..),
   UnaryOperator (..),
+  BinaryOperator (..),
 )
 where
 
 
 import qualified Compiler.Lexer.Token as Tokens (Token(..))
-import Control.Monad.Writer (WriterT (..))
+import Control.Monad.Writer (WriterT (..), MonadWriter (tell))
 import Control.Monad.State (StateT (..), get, put, MonadState)
 import Control.Monad.Identity (Identity (..))
 import Control.Monad.Trans.Maybe (MaybeT (..))
 
 import Compiler.Lexer.SourceToken
-import Compiler.Parser.ParserError (ParserError)
+import Compiler.Parser.ParserError (ParserError (..))
 import Compiler.Lexer.Keyword
+
+import Debug.Trace
+import Control.Monad (void)
 
 
 type Identifier = String
@@ -34,12 +38,34 @@ data Statement = ReturnStatement Expression
 data Expression
   = ConstantExpression Integer
   | UnaryExpression UnaryOperator Expression
+  | BinaryExpression BinaryOperator Expression Expression
   deriving (Show)
 
 data UnaryOperator
   = Negate
   | BitwiseComplement
   deriving (Show)
+
+data BinaryOperator
+  = Add
+  | Subtract
+  | Multiply
+  | Divide
+  | Remainder
+  deriving (Show)
+
+
+getBinaryOperatorPrecedence :: BinaryOperator -> Int
+getBinaryOperatorPrecedence op = case op of
+  Add -> 45
+  Subtract -> 45
+  Multiply -> 50
+  Divide -> 50
+  Remainder -> 50
+
+isBinaryOperatorLeftAssociative :: BinaryOperator -> Bool
+isBinaryOperatorLeftAssociative op = True
+
 
 
 type ParserT m = WriterT [ParserError] (StateT [SourceToken] m)
@@ -81,22 +107,56 @@ parseStatement = do
 
 
 parseExpression :: MaybeParser Expression
-parseExpression = do
-  SourceToken token _ <- getNextToken
+parseExpression = go 0
+  where
+    go :: Int -> MaybeParser Expression
+    go minPrec = parseFactor >>= go' minPrec
+
+    -- Use precedence climbing to parse a binary expression.
+    go' :: Int -> Expression -> MaybeParser Expression
+    go' minPrec left = do
+      SourceToken token _ <- peekNextToken
+      case getBinaryOperator token of
+        Just op -> do
+          let prec = getBinaryOperatorPrecedence op
+          if prec >= minPrec
+            then do
+              tossNextToken
+              right <- go (prec + 1)
+              let left' = BinaryExpression op left right
+              go' minPrec left'
+            else return left
+        Nothing -> return left
+
+
+getBinaryOperator :: Tokens.Token -> Maybe BinaryOperator
+getBinaryOperator token = case token of
+  Tokens.Plus -> Just Add
+  Tokens.Minus -> Just Subtract
+  Tokens.Asterisk -> Just Multiply
+  Tokens.Slash -> Just Divide
+  Tokens.Percent -> Just Remainder
+  _ -> Nothing
+
+
+parseFactor :: MaybeParser Expression
+parseFactor = do
+  source@(SourceToken token _) <- getNextToken
   case token of
     Tokens.Constant value -> MaybeT . return . Just $ ConstantExpression value
     Tokens.Minus -> parseUnaryExpression Negate
     Tokens.Tilde -> parseUnaryExpression BitwiseComplement
     Tokens.OpenParen -> parseParenthesizedExpression
-    _ -> MaybeT . return $ Nothing  -- TODO: emit parser error
+    x -> do
+      let _ = trace $ "whoops " ++ show x
+      let message = "unexpected token \"" ++ show x ++ "\""
+      tell [ParserError {message=message, token=source}]
+      MaybeT . return $ Nothing
 
-  -- MaybeT . return $ case token of
-  --   SourceToken (Tokens.Constant value) _ -> Just (ConstantExpression value)
-  --   _ -> Nothing
 
 parseUnaryExpression :: UnaryOperator -> MaybeParser Expression
 parseUnaryExpression op = do
-  expr <- parseExpression
+  expr <- parseFactor
   MaybeT . return . Just $ UnaryExpression op expr
 
 
@@ -124,9 +184,12 @@ expectKeyword keyword =
 expectToken :: Tokens.Token -> MaybeParser()
 expectToken expected = do
   source@(SourceToken actual _) <- getNextToken
-  MaybeT . return $ if actual == expected
-    then Just ()
-    else Nothing   -- TODO: emit parser error
+  if actual == expected
+    then MaybeT . return $ Just ()
+    else do
+      let message = "expected token \"" ++ show expected ++ "\""
+      tell [ParserError {token=source, message=message}]
+      MaybeT . return $ Nothing
 
 
 
@@ -146,4 +209,6 @@ peekNextToken = MaybeT do
     [] -> return Nothing
 
 
+tossNextToken :: MaybeParser ()
+tossNextToken = void getNextToken
 

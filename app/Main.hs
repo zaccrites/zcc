@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Main(main) where
 
@@ -7,6 +8,7 @@ import Compiler.Lexer.Tokenizer
 import Compiler.Lexer.SourceToken
 import Compiler.Lexer.Token
 import Compiler.Parser.Parser
+import Compiler.Parser.ParserError
 import Compiler.CodeGen.Intermediate
 import Compiler.CodeGen.AssemblyX64
 
@@ -49,12 +51,15 @@ doLexProgram text = do
 
 doParseProgram :: [SourceToken] -> IO ()
 doParseProgram tokens = do
-  putStrLn "---------------------- Tokens ----------------------"
   let (program, parserErrors, tokens') = parseProgram tokens
   case program of
     Nothing -> do
-      forM_ (enumerate parserErrors) \(i, err) -> putStrLn (show i ++ ": " ++ show err)
+      putStrLn "Parser Failed!"
+      if null parserErrors
+        then putStrLn "  ... but there were no parser errors."
+        else forM_ (enumerate parserErrors) \(i, err) -> putStrLn (show i ++ ": " ++ formatParserError err)
     Just program' -> do
+      putStrLn "---------------------- AST ----------------------"
       print program'
       putStrLn "\n"
       doIrCodeGen program'

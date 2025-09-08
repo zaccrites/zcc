@@ -48,8 +48,11 @@ getNextToken = do
       '{' -> give' OpenBrace
       '}' -> give' CloseBrace
       ';' -> give' Semicolon
-      '+' -> give' Plus
+      '+' -> tossNextChar >> readPlusToken >>= give
       '-' -> tossNextChar >> readMinusToken >>= give
+      '*' -> give' Asterisk
+      '/' -> give' Slash
+      '%' -> give' Percent
       '~' -> give' Tilde
       c | isDigit c -> readIntLiteralToken >>= maybeGive
       c | isIdentifierHeadChar c -> readIdentifierOrKeyword >>= give
@@ -92,6 +95,12 @@ getNextToken = do
       let msg = "unexpected '" ++ (c:"'")
       emitLexerError msg
 
+readPlusToken :: Lexer Token
+readPlusToken = do
+  nextChar <- peekNextChar
+  case nextChar of
+    Just '+' -> tossNextChar >> return Increment
+    _ -> return Plus
 
 readMinusToken :: Lexer Token
 readMinusToken = do
