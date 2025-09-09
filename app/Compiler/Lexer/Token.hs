@@ -26,11 +26,19 @@ data Token
   | Tilde
   | Caret
   | Pipe
+  | DoublePipe
   | Ampersand
+  | DoubleAmpersand
   | LessThan
   | GreaterThan
+  | LessThanEqual
+  | GreaterThanEqual
   | ShiftLeft
   | ShiftRight
+  | Equal
+  | NotEqual
+  | Exclamation
+  | Assign
   | Semicolon
   | EndOfFile
   deriving (Show, Eq)
@@ -56,10 +64,18 @@ tokenToString token  = case token of
   Tilde -> "~"
   Caret -> "^"
   Pipe -> "|"
+  Exclamation -> "!"
+  DoublePipe -> "||"
   Ampersand -> "&"
+  DoubleAmpersand -> "&&"
   LessThan -> "<"
   GreaterThan -> ">"
+  LessThanEqual -> "<="
+  GreaterThanEqual -> ">="
   ShiftLeft -> "<<"
   ShiftRight -> "<<"
+  Equal -> "=="
+  NotEqual -> "!="
+  Assign -> "="
   EndOfFile -> "<EOF>"
 

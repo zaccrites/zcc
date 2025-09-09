@@ -9,6 +9,7 @@ module Compiler.CodeGen.Intermediate (
   IrWriteValue (..),
   IrUnaryOp (..),
   IrBinaryOp (..),
+  IrJumpCondition (..),
   genIrProgram,
 )
 where
@@ -28,11 +29,21 @@ data IrInstruction
   = IrReturn IrReadValue
   | IrUnary IrUnaryOp IrReadValue IrWriteValue
   | IrBinary IrBinaryOp IrReadValue IrReadValue IrWriteValue
+  | IrCopy IrReadValue IrWriteValue
+  | IrJump IrJumpCondition Identifier
+  | IrLabel Identifier
+  deriving (Show)
+
+data IrJumpCondition
+  = IrJumpAlways
+  | IrJumpIfZero IrReadValue
+  | IrJumpIfNotZero IrReadValue
   deriving (Show)
 
 data IrUnaryOp
   = IrComplement
   | IrNegate
+  | IrLogicalNot
   deriving (Show)
 
 data IrBinaryOp
@@ -46,6 +57,12 @@ data IrBinaryOp
   | IrBitwiseXor
   | IrBitwiseShiftLeft
   | IrBitwiseShiftRight
+  | IrLessThan
+  | IrLessThanEqual
+  | IrGreaterThan
+  | IrGreaterThanEqual
+  | IrEqual
+  | IrNotEqual
   deriving (Show)
 
 data IrReadValue
@@ -58,17 +75,18 @@ data IrWriteValue
   deriving (Show)
 
 
-
 type TempVarCounter = Integer
+type LabelCounter = Integer
+type IrGenState = (TempVarCounter, LabelCounter)
 
-type IrGenT m = StateT TempVarCounter m
+type IrGenT m = StateT IrGenState m
 type IrGen = IrGenT Identity
 
 
 genIrProgram :: Program -> IrProgram
 genIrProgram program = result
   where
-    (result, _) = runIdentity $ runStateT (genIrProgram' program) 0
+    (result, _) = runIdentity $ runStateT (genIrProgram' program) (0, 0)
 
 genIrProgram' :: Program -> IrGen IrProgram
 genIrProgram' (Program func) = IrProgram <$> genIrFuncDef func
@@ -100,8 +118,54 @@ genExprIrInstructions (UnaryExpression op expr) = do
     irOp = case op of
       Negate -> IrNegate
       BitwiseComplement -> IrComplement
+      LogicalNot -> IrLogicalNot
 
--- FUTURE: skip right-hand side for short-circuited logical operators
+genExprIrInstructions (BinaryExpression LogicalAnd left right) = do
+  (innerInstructionsLeft, innerValueLeft) <- genExprIrInstructions left
+  (innerInstructionsRight, innerValueRight) <- genExprIrInstructions right
+  destName <- getNewTempVarName
+  falseLabel <- getNewLabelName "andFalse"
+  endLabel <- getNewLabelName "andEnd"
+  let dest = IrWriteVar destName
+  let instructions =
+        (
+          innerInstructionsLeft ++
+          [IrJump (IrJumpIfZero innerValueLeft) falseLabel] ++
+          innerInstructionsRight ++
+          [ IrJump (IrJumpIfZero innerValueRight) falseLabel
+          , IrCopy (IrConstant 1) dest
+          , IrJump IrJumpAlways endLabel
+          , IrLabel falseLabel
+          , IrCopy (IrConstant 0) dest
+          , IrLabel endLabel
+          ]
+        )
+  return (instructions, IrReadVar destName)
+
+
+genExprIrInstructions (BinaryExpression LogicalOr left right) = do
+  (innerInstructionsLeft, innerValueLeft) <- genExprIrInstructions left
+  (innerInstructionsRight, innerValueRight) <- genExprIrInstructions right
+  destName <- getNewTempVarName
+  trueLabel <- getNewLabelName "orTrue"
+  endLabel <- getNewLabelName "orEnd"
+  let dest = IrWriteVar destName
+  let instructions =
+        (
+          innerInstructionsLeft ++
+          [IrJump (IrJumpIfNotZero innerValueLeft) trueLabel] ++
+          innerInstructionsRight ++
+          [ IrJump (IrJumpIfNotZero innerValueRight) trueLabel
+          , IrCopy (IrConstant 0) dest
+          , IrJump IrJumpAlways endLabel
+          , IrLabel trueLabel
+          , IrCopy (IrConstant 1) dest
+          , IrLabel endLabel
+          ]
+        )
+  return (instructions, IrReadVar destName)
+
+
 genExprIrInstructions (BinaryExpression op left right) = do
   (innerInstructionsLeft, innerValueLeft) <- genExprIrInstructions left
   (innerInstructionsRight, innerValueRight) <- genExprIrInstructions right
@@ -123,11 +187,26 @@ genExprIrInstructions (BinaryExpression op left right) = do
       BitwiseXor -> IrBitwiseXor
       BitwiseShiftLeft -> IrBitwiseShiftLeft
       BitwiseShiftRight -> IrBitwiseShiftRight
+      LessThan -> IrLessThan
+      LessThanEqual -> IrLessThanEqual
+      GreaterThan -> IrGreaterThan
+      GreaterThanEqual -> IrGreaterThanEqual
+      Equal -> IrEqual
+      NotEqual -> IrNotEqual
 
 
 getNewTempVarName :: IrGen String
 getNewTempVarName = do
-  count <- get
-  put (count + 1)
-  return $ ".tmp." ++ show count
+  (tempVarCount, labelCount) <- get
+  put (tempVarCount + 1, labelCount)
+  return $ ".tmp." ++ show (tempVarCount + 1)
+
+
+-- FUTURE: move "implementation details" like the ".L" prefix for local
+-- labels on Linux to the AssemblyX64 stage.
+getNewLabelName :: String -> IrGen Identifier
+getNewLabelName prefix = do
+  (tempVarCount, labelCount) <- get
+  put (tempVarCount, labelCount + 1)
+  return $ ".L_" ++ prefix ++ "." ++ show (labelCount + 1)
 

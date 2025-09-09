@@ -24,7 +24,6 @@ import Compiler.Lexer.SourceToken
 import Compiler.Parser.ParserError (ParserError (..))
 import Compiler.Lexer.Keyword
 
-import Debug.Trace
 import Control.Monad (void)
 
 
@@ -44,6 +43,7 @@ data Expression
 data UnaryOperator
   = Negate
   | BitwiseComplement
+  | LogicalNot
   deriving (Show)
 
 data BinaryOperator
@@ -57,6 +57,14 @@ data BinaryOperator
   | BitwiseAnd
   | BitwiseOr
   | BitwiseXor
+  | LogicalAnd
+  | LogicalOr
+  | Equal
+  | NotEqual
+  | GreaterThan
+  | LessThan
+  | GreaterThanEqual
+  | LessThanEqual
   deriving (Show)
 
 
@@ -70,9 +78,17 @@ getBinaryOperatorPrecedence op = case op of
   Subtract -> 120
   BitwiseShiftLeft -> 110
   BitwiseShiftRight -> 110
+  LessThan -> 100
+  LessThanEqual -> 100
+  GreaterThan -> 100
+  GreaterThanEqual -> 100
+  Equal -> 90
+  NotEqual -> 90
   BitwiseAnd -> 80
-  BitwiseOr -> 70
-  BitwiseXor -> 60
+  BitwiseXor -> 70
+  BitwiseOr -> 60
+  LogicalAnd -> 50
+  LogicalOr -> 40
 
 isBinaryOperatorLeftAssociative :: BinaryOperator -> Bool
 isBinaryOperatorLeftAssociative op = True
@@ -152,6 +168,14 @@ getBinaryOperator token = case token of
   Tokens.Caret -> Just BitwiseXor
   Tokens.ShiftLeft -> Just BitwiseShiftLeft
   Tokens.ShiftRight -> Just BitwiseShiftRight
+  Tokens.LessThan -> Just LessThan
+  Tokens.LessThanEqual -> Just LessThanEqual
+  Tokens.GreaterThan -> Just GreaterThan
+  Tokens.GreaterThanEqual -> Just GreaterThanEqual
+  Tokens.Equal -> Just Equal
+  Tokens.NotEqual -> Just NotEqual
+  Tokens.DoubleAmpersand -> Just LogicalAnd
+  Tokens.DoublePipe -> Just LogicalOr
   _ -> Nothing
 
 
@@ -162,9 +186,9 @@ parseFactor = do
     Tokens.Constant value -> MaybeT . return . Just $ ConstantExpression value
     Tokens.Minus -> parseUnaryExpression Negate
     Tokens.Tilde -> parseUnaryExpression BitwiseComplement
+    Tokens.Exclamation -> parseUnaryExpression LogicalNot
     Tokens.OpenParen -> parseParenthesizedExpression
     x -> do
-      let _ = trace $ "whoops " ++ show x
       let message = "unexpected token \"" ++ show x ++ "\""
       tell [ParserError {message=message, token=source}]
       MaybeT . return $ Nothing

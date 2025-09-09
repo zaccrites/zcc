@@ -55,10 +55,12 @@ getNextToken = do
       '%' -> give' Percent
       '~' -> give' Tilde
       '^' -> give' Caret
-      '|' -> give' Pipe
-      '&' -> give' Ampersand
+      '|' -> tossNextChar >> ifNextCharMatches '|' DoublePipe Pipe >>= give
+      '&' -> tossNextChar >> ifNextCharMatches '&' DoubleAmpersand Ampersand >>= give
       '<' -> tossNextChar >> readLessThanToken >>= give
       '>' -> tossNextChar >> readGreaterThanToken >>= give
+      '=' -> tossNextChar >> ifNextCharMatches '=' Equal Assign >>= give
+      '!' -> tossNextChar >> ifNextCharMatches '=' NotEqual Exclamation >>= give
       c | isDigit c -> readIntLiteralToken >>= maybeGive
       c | isIdentifierHeadChar c -> readIdentifierOrKeyword >>= give
       c -> emitUnexpectedCharError c >> return Nothing
@@ -101,6 +103,14 @@ getNextToken = do
       emitLexerError msg
 
 
+ifNextCharMatches :: Char -> Token -> Token -> Lexer Token
+ifNextCharMatches c ifYes ifNo = do
+  nextChar <- peekNextChar
+  case nextChar of
+    Just c' | c == c' -> tossNextChar >> return ifYes
+    _ -> return ifNo
+
+
 readPlusToken :: Lexer Token
 readPlusToken = do
   nextChar <- peekNextChar
@@ -122,6 +132,7 @@ readLessThanToken = do
   nextChar <- peekNextChar
   case nextChar of
     Just '<' -> tossNextChar >> return ShiftLeft
+    Just '=' -> tossNextChar >> return LessThanEqual
     _ -> return LessThan
 
 
@@ -130,5 +141,6 @@ readGreaterThanToken = do
   nextChar <- peekNextChar
   case nextChar of
     Just '>' -> tossNextChar >> return ShiftRight
+    Just '=' -> tossNextChar >> return GreaterThanEqual
     _ -> return GreaterThan
 
