@@ -3,24 +3,32 @@
 
 module Main(main) where
 
-import Control.Monad (forM_, unless, when)
+import System.Exit (ExitCode (..), exitWith, exitSuccess)
+
+import Control.Monad (forM_, when)
 import Compiler.Lexer.Tokenizer
 import Compiler.Lexer.SourceToken
 import Compiler.Lexer.Token
 import Compiler.Parser.Parser
 import Compiler.Parser.ParserError
+import Compiler.Parser.AstPrinting
 import Compiler.CodeGen.Intermediate
 import Compiler.CodeGen.AssemblyX64
+import Compiler.SemanticAnalysis.VariableResolution
 
 -- enumerate :: Integral b => [a] -> [(b, a)]
 enumerate :: [a] -> [(Integer, a)]
 enumerate = zip [1..]
 
 
+-- TODO: Define a top-level "exit reason" enum type and map to ExitCode
 main :: IO ()
-main = do
+main = run >>= exitWith
+
+run :: IO ExitCode
+run = do
   text <- readFile "/home/zac/code/zcc/sample.c"
-  -- putStr text
+  putStr text
 
   putStrLn "---------------------- Code ----------------------"
   let textLines = lines text
@@ -30,8 +38,7 @@ main = do
   doLexProgram text
 
 
-
-doLexProgram :: String -> IO ()
+doLexProgram :: String -> IO ExitCode
 doLexProgram text = do
   putStrLn "---------------------- Tokens ----------------------"
   let (tokens, lexerErrors) = getTextTokens text
@@ -47,9 +54,10 @@ doLexProgram text = do
       putStrLn "---------------------- Lexer Errors ----------------------"
       forM_ (enumerate lexerErrors ) \(i, err) -> putStrLn (show i ++ ": " ++ show err)
       putStrLn "\n"
+      return $ ExitFailure 1
 
 
-doParseProgram :: [SourceToken] -> IO ()
+doParseProgram :: [SourceToken] -> IO ExitCode
 doParseProgram tokens = do
   let (program, parserErrors, tokens') = parseProgram tokens
   case program of
@@ -58,14 +66,32 @@ doParseProgram tokens = do
       if null parserErrors
         then putStrLn "  ... but there were no parser errors."
         else forM_ (enumerate parserErrors) \(i, err) -> putStrLn (show i ++ ": " ++ formatParserError err)
+      return $ ExitFailure 1
     Just program' -> do
       putStrLn "---------------------- AST ----------------------"
-      print program'
+      putStrLn . unlines . printAst $ program'
       putStrLn "\n"
-      doIrCodeGen program'
+      doSemanticAnalysis program'
 
 
-doIrCodeGen :: Program -> IO ()
+doSemanticAnalysis :: Program -> IO ExitCode
+doSemanticAnalysis program = do
+  let Program func = program
+  let (func', errors) = resolveVariables func
+  let program' = Program func'
+
+  putStrLn "---------------------- Semantic Analysis ----------------------"
+  if null errors
+    then forM_ (printAst program') putStrLn
+    else forM_ (enumerate errors) \(i, err) -> putStrLn (show i ++ ": " ++ err)
+  putStrLn "\n"
+
+  if null errors
+    then doIrCodeGen program'
+    else return $ ExitFailure 1
+
+
+doIrCodeGen :: Program -> IO ExitCode
 doIrCodeGen program = do
   let irProgram = genIrProgram program
 
@@ -77,9 +103,9 @@ doIrCodeGen program = do
   putStrLn "\n"
 
   doAsmCodeGen irProgram
-  --
 
-doAsmCodeGen :: IrProgram -> IO ()
+
+doAsmCodeGen :: IrProgram -> IO ExitCode
 doAsmCodeGen program = do
   let asmProgram = genAsmProgram program
 
@@ -96,4 +122,5 @@ doAsmCodeGen program = do
   putStrLn "\n"
 
   writeFile "out.s" asmText
+  return ExitSuccess
 

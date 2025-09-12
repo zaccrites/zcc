@@ -55,6 +55,7 @@ common warnings
     ghc-options:
       -Wall
       -Werror=incomplete-patterns
+      -Werror=missing-methods
 
 executable zcc
     -- Import common warning flags.
@@ -76,8 +77,10 @@ executable zcc
       Compiler.Lexer.SourceToken
       Compiler.Lexer.Token
       Compiler.Lexer.Tokenizer
+      Compiler.Parser.AstPrinting
       Compiler.Parser.Parser
       Compiler.Parser.ParserError
+      Compiler.SemanticAnalysis.VariableResolution
       Compiler.SourceLocation
 
     -- LANGUAGE extensions used by modules in this package.

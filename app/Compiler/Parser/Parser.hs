@@ -10,6 +10,8 @@ module Compiler.Parser.Parser (
   Expression (..),
   UnaryOperator (..),
   BinaryOperator (..),
+  BlockItem (..),
+  Declaration (..),
 )
 where
 
@@ -28,16 +30,32 @@ import Control.Monad (void)
 
 
 type Identifier = String
-data FuncDef = FuncDef Identifier Statement deriving (Show)
+
 data Program = Program FuncDef deriving (Show)
 
-data Statement = ReturnStatement Expression
+data FuncDef = FuncDef Identifier [BlockItem] deriving (Show)
+
+data BlockItem
+  = BlockItemStatement Statement
+  | BlockItemDeclaration Declaration
+  deriving (Show)
+
+data Statement
+  = ReturnStatement Expression
+  | ExpressionStatement Expression
+  | NullStatement
   deriving (Show)
 
 data Expression
   = ConstantExpression Integer
   | UnaryExpression UnaryOperator Expression
   | BinaryExpression BinaryOperator Expression Expression
+  | AssignmentExpression Expression Expression
+  | VariableExpression Identifier
+  deriving (Show)
+
+data Declaration
+  = VariableDeclaration Identifier (Maybe Expression)
   deriving (Show)
 
 data UnaryOperator
@@ -65,6 +83,7 @@ data BinaryOperator
   | LessThan
   | GreaterThanEqual
   | LessThanEqual
+  | Assign
   deriving (Show)
 
 
@@ -89,9 +108,13 @@ getBinaryOperatorPrecedence op = case op of
   BitwiseOr -> 60
   LogicalAnd -> 50
   LogicalOr -> 40
+  Assign -> 20
+
 
 isBinaryOperatorLeftAssociative :: BinaryOperator -> Bool
-isBinaryOperatorLeftAssociative op = True
+isBinaryOperatorLeftAssociative op = case op of
+  Assign -> False
+  _ -> True
 
 
 
@@ -120,17 +143,61 @@ parseFuncDef = do
   expectToken Tokens.OpenParen
   expectToken Tokens.CloseParen
   expectToken Tokens.OpenBrace
-  stmt <- parseStatement
-  expectToken Tokens.CloseBrace
-  return $ FuncDef name stmt
+  blockItems <- parseBlockItems []
+  return $ FuncDef name blockItems
+
+  where
+    parseBlockItems :: [BlockItem] -> MaybeParser [BlockItem]
+    parseBlockItems xs = do
+      SourceToken nextToken _ <- peekNextToken
+      case nextToken of
+        Tokens.CloseBrace -> tossNextToken >> return xs
+        _ -> do
+          x <- parseBlockItem
+          parseBlockItems (xs ++ [x])
+
+
+parseBlockItem :: MaybeParser BlockItem
+parseBlockItem = do
+  SourceToken nextToken _ <- peekNextToken
+  case nextToken of
+    Tokens.Keyword KeywordInt -> BlockItemDeclaration <$> parseDeclaration
+    _ -> BlockItemStatement <$> parseStatement
+
+
+parseDeclaration :: MaybeParser Declaration
+parseDeclaration = do
+  expectKeyword KeywordInt
+  name <- getIdentifier
+
+  source@(SourceToken nextToken _) <- getNextToken
+  case nextToken of
+    Tokens.Assign -> do
+      initExpr <- parseExpression
+      expectToken Tokens.Semicolon
+      return $ VariableDeclaration name (Just initExpr)
+    Tokens.Semicolon -> return $ VariableDeclaration name Nothing
+    x -> do
+      let message = "unexpected token \"" ++ show x ++ "\", expected '=' or ';' (parseDeclaration)"
+      tell [ParserError {message=message, token=source}]
+      MaybeT . return $ Nothing
+
 
 
 parseStatement :: MaybeParser Statement
 parseStatement = do
-  expectKeyword KeywordReturn
-  expr <- parseExpression
-  expectToken Tokens.Semicolon
-  return $ ReturnStatement expr
+  source@(SourceToken nextToken _) <- peekNextToken
+  case nextToken of
+    Tokens.Semicolon -> tossNextToken >> return NullStatement
+    Tokens.Keyword KeywordReturn -> do
+      tossNextToken
+      expr <- parseExpression
+      expectToken Tokens.Semicolon
+      return $ ReturnStatement expr
+    _ -> do
+      expr <- parseExpression
+      expectToken Tokens.Semicolon
+      return $ ExpressionStatement expr
 
 
 parseExpression :: MaybeParser Expression
@@ -149,11 +216,19 @@ parseExpression = go 0
           if prec >= minPrec
             then do
               tossNextToken
-              right <- go (prec + 1)
-              let left' = BinaryExpression op left right
-              go' minPrec left'
+              right <- go (nextPrec op prec)
+              go' minPrec (makeNewLeft op left right)
             else return left
         Nothing -> return left
+
+    nextPrec :: BinaryOperator -> Int -> Int
+    nextPrec op prec
+      | isBinaryOperatorLeftAssociative op = prec + 1
+      | otherwise = prec
+
+    makeNewLeft :: BinaryOperator -> Expression -> Expression -> Expression
+    makeNewLeft Assign = AssignmentExpression
+    makeNewLeft op = BinaryExpression op
 
 
 getBinaryOperator :: Tokens.Token -> Maybe BinaryOperator
@@ -176,6 +251,7 @@ getBinaryOperator token = case token of
   Tokens.NotEqual -> Just NotEqual
   Tokens.DoubleAmpersand -> Just LogicalAnd
   Tokens.DoublePipe -> Just LogicalOr
+  Tokens.Assign -> Just Assign
   _ -> Nothing
 
 
@@ -188,8 +264,9 @@ parseFactor = do
     Tokens.Tilde -> parseUnaryExpression BitwiseComplement
     Tokens.Exclamation -> parseUnaryExpression LogicalNot
     Tokens.OpenParen -> parseParenthesizedExpression
+    Tokens.Identifier name -> MaybeT . return . Just $ VariableExpression name
     x -> do
-      let message = "unexpected token \"" ++ show x ++ "\""
+      let message = "unexpected token \"" ++ show x ++ "\" (parseFactor)"
       tell [ParserError {message=message, token=source}]
       MaybeT . return $ Nothing
 
@@ -230,7 +307,6 @@ expectToken expected = do
       let message = "expected token \"" ++ show expected ++ "\""
       tell [ParserError {token=source, message=message}]
       MaybeT . return $ Nothing
-
 
 
 getNextToken :: MaybeParser SourceToken
