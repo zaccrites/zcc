@@ -6,9 +6,8 @@ where
 
 import Compiler.Parser.Parser
 
-import Control.Monad.State (StateT (..), get, put, modify)
+import Control.Monad.State (StateT (..))
 import Control.Monad.Identity (Identity (..))
-import Control.Monad (when)
 
 
 type IndentLevel = Int
@@ -52,13 +51,8 @@ instance AstPrintNode Expression where
   getAstNodeDescription (UnaryExpression op _) = "UnaryExpression : " ++ show op
   getAstNodeDescription (BinaryExpression op _ _) = "BinaryExpression : " ++ show op
   getAstNodeDescription (VariableExpression name) = "VariableExpression : '" ++ name ++ "'"
-  getAstNodeDescription (AssignmentExpression _ _) = "AssignmentExpression"
   getAstNodeDescription x = show x
 
-  getAstSubnodeLines (AssignmentExpression left right) = do
-    leftLines <- printAstNode left
-    rightLines <- printAstNode right
-    return $ leftLines ++ rightLines
   getAstSubnodeLines (UnaryExpression _ expr) = printAstNode expr
   getAstSubnodeLines (BinaryExpression _ left right) = do
     leftLines <- printAstNode left
@@ -82,18 +76,4 @@ printAstNode node = do
     makeResult :: String -> [String] -> [String]
     makeResult line [] = [line]
     makeResult line restLines = [line ++ " ("] ++ restLines ++ [")"]
-
-
--- increaseIndent :: AstPrinter ()
--- increaseIndent = modify (+1)
---
--- decreaseIndent :: AstPrinter ()
--- decreaseIndent = modify (\level -> max 0 (level - 1))
-
--- indentString :: String -> AstPrinter String
--- indentString xs = do
---   level <- get
---   -- let indent = concat . replicate level $ ">"
---   let indent = "(" ++ show level ++ ")"
---   return $ indent ++ xs
 

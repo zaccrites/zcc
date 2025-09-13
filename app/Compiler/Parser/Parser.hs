@@ -50,7 +50,6 @@ data Expression
   = ConstantExpression Integer
   | UnaryExpression UnaryOperator Expression
   | BinaryExpression BinaryOperator Expression Expression
-  | AssignmentExpression Expression Expression
   | VariableExpression Identifier
   deriving (Show)
 
@@ -62,6 +61,10 @@ data UnaryOperator
   = Negate
   | BitwiseComplement
   | LogicalNot
+  | PrefixIncrement
+  | PrefixDecrement
+  | PostfixIncrement
+  | PostfixDecrement
   deriving (Show)
 
 data BinaryOperator
@@ -84,6 +87,16 @@ data BinaryOperator
   | GreaterThanEqual
   | LessThanEqual
   | Assign
+  | PlusAssign
+  | MinusAssign
+  | MultiplyAssign
+  | DivideAssign
+  | RemainderAssign
+  | BitwiseAndAssign
+  | BitwiseOrAssign
+  | BitwiseXorAssign
+  | BitwiseShiftLeftAssign
+  | BitwiseShiftRightAssign
   deriving (Show)
 
 
@@ -109,6 +122,16 @@ getBinaryOperatorPrecedence op = case op of
   LogicalAnd -> 50
   LogicalOr -> 40
   Assign -> 20
+  PlusAssign -> 20
+  MinusAssign -> 20
+  MultiplyAssign -> 20
+  DivideAssign -> 20
+  RemainderAssign -> 20
+  BitwiseAndAssign -> 20
+  BitwiseOrAssign -> 20
+  BitwiseXorAssign -> 20
+  BitwiseShiftLeftAssign -> 20
+  BitwiseShiftRightAssign -> 20
 
 
 isBinaryOperatorLeftAssociative :: BinaryOperator -> Bool
@@ -204,7 +227,14 @@ parseExpression :: MaybeParser Expression
 parseExpression = go 0
   where
     go :: Int -> MaybeParser Expression
-    go minPrec = parseFactor >>= go' minPrec
+    go minPrec = do
+      expr <- parseFactor >>= go' minPrec
+      SourceToken nextToken _ <- peekNextToken
+      let returnUnary op = tossNextToken >> return (UnaryExpression op expr)
+      case nextToken of
+        Tokens.Increment -> returnUnary PostfixIncrement
+        Tokens.Decrement -> returnUnary PostfixDecrement
+        _ -> return expr
 
     -- Use precedence climbing to parse a binary expression.
     go' :: Int -> Expression -> MaybeParser Expression
@@ -217,7 +247,8 @@ parseExpression = go 0
             then do
               tossNextToken
               right <- go (nextPrec op prec)
-              go' minPrec (makeNewLeft op left right)
+              let left' = BinaryExpression op left right
+              go' minPrec left'
             else return left
         Nothing -> return left
 
@@ -225,10 +256,6 @@ parseExpression = go 0
     nextPrec op prec
       | isBinaryOperatorLeftAssociative op = prec + 1
       | otherwise = prec
-
-    makeNewLeft :: BinaryOperator -> Expression -> Expression -> Expression
-    makeNewLeft Assign = AssignmentExpression
-    makeNewLeft op = BinaryExpression op
 
 
 getBinaryOperator :: Tokens.Token -> Maybe BinaryOperator
@@ -252,6 +279,16 @@ getBinaryOperator token = case token of
   Tokens.DoubleAmpersand -> Just LogicalAnd
   Tokens.DoublePipe -> Just LogicalOr
   Tokens.Assign -> Just Assign
+  Tokens.PlusAssign -> Just PlusAssign
+  Tokens.MinusAssign -> Just MinusAssign
+  Tokens.AsteriskAssign -> Just MultiplyAssign
+  Tokens.SlashAssign -> Just DivideAssign
+  Tokens.PercentAssign -> Just RemainderAssign
+  Tokens.AmpersandAssign -> Just BitwiseAndAssign
+  Tokens.PipeAssign -> Just BitwiseOrAssign
+  Tokens.CaretAssign -> Just BitwiseXorAssign
+  Tokens.ShiftLeftAssign -> Just BitwiseShiftLeftAssign
+  Tokens.ShiftRightAssign -> Just BitwiseShiftRightAssign
   _ -> Nothing
 
 
@@ -263,6 +300,8 @@ parseFactor = do
     Tokens.Minus -> parseUnaryExpression Negate
     Tokens.Tilde -> parseUnaryExpression BitwiseComplement
     Tokens.Exclamation -> parseUnaryExpression LogicalNot
+    Tokens.Increment -> parseUnaryExpression PrefixIncrement
+    Tokens.Decrement -> parseUnaryExpression PrefixDecrement
     Tokens.OpenParen -> parseParenthesizedExpression
     Tokens.Identifier name -> MaybeT . return . Just $ VariableExpression name
     x -> do

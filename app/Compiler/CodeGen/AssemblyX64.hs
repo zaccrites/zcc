@@ -308,10 +308,11 @@ genAsmInstructions (IrBinary IrNotEqual left right dest) =
   genAsmInstructionsRelationalCommon AsmFlagIfNotEqual left right dest
 
 genAsmInstructions (IrBinary op left right dest) =
-  [ AsmMov asmLeft asmDest
-  , AsmBinary asmOp asmRight asmDest
-  ]
+  if left == readIrValue dest
+    then instructions
+    else AsmMov asmLeft asmDest : instructions
   where
+    instructions = [AsmBinary asmOp asmRight asmDest]
     asmLeft = genAsmReadOperand left
     asmRight = genAsmReadOperand right
     asmDest = genAsmWriteOperand dest
@@ -357,15 +358,6 @@ genAsmInstructionsRelationalCommon flag left right dest =
     asmRight = genAsmReadOperand left
     asmDest = genAsmWriteOperand dest
     scratchRegister = AsmWriteRegister AsmRegR11
-
-    evalConstant :: Integer -> Integer -> Bool
-    evalConstant left' right' = case flag of
-      AsmFlagIfEqual -> left' == right'
-      AsmFlagIfNotEqual -> left' /= right'
-      AsmFlagIfLessThan -> left' < right'
-      AsmFlagIfLessThanOrEqual -> left' <= right'
-      AsmFlagIfGreaterThan -> left' > right'
-      AsmFlagIfGreaterThanOrEqual -> left' >= right'
 
 
 data DesiredIDivOutput = Quotient | Remainder

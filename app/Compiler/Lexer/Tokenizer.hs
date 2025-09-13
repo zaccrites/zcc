@@ -16,6 +16,7 @@ import Compiler.Lexer.SourceToken
 
 import Data.Char
 import Control.Monad.State (runState, get)
+import Control.Monad (when)
 
 
 getTextTokens :: String -> ([SourceToken], [LexerError])
@@ -34,9 +35,16 @@ getTextTokens' = do
     Just x -> (x :) <$> getTextTokens'
 
 
+consumeSpacesAndComments :: Lexer ()
+consumeSpacesAndComments = do
+  _ <- consumeSpace
+  hasComment <- consumeComment
+  when hasComment consumeSpacesAndComments
+
+
 getNextToken :: Lexer (Maybe SourceToken)
 getNextToken = do
-  consumeSpace
+  consumeSpacesAndComments
   LexerState { location=location } <- get
 
   nextChar <- peekNextChar
@@ -48,13 +56,13 @@ getNextToken = do
       '{' -> give' OpenBrace
       '}' -> give' CloseBrace
       ';' -> give' Semicolon
+      '~' -> give' Tilde
       '+' -> tossNextChar >> readPlusToken >>= give
       '-' -> tossNextChar >> readMinusToken >>= give
-      '*' -> give' Asterisk
-      '/' -> give' Slash
-      '%' -> give' Percent
-      '~' -> give' Tilde
-      '^' -> give' Caret
+      '*' -> tossNextChar >> ifNextCharMatches '=' AsteriskAssign Asterisk >>= give
+      '/' -> tossNextChar >> ifNextCharMatches '=' SlashAssign Slash >>= give
+      '%' -> tossNextChar >> ifNextCharMatches '=' PercentAssign Percent >>= give
+      '^' -> tossNextChar >> ifNextCharMatches '=' CaretAssign Caret >>= give
       '|' -> tossNextChar >> ifNextCharMatches '|' DoublePipe Pipe >>= give
       '&' -> tossNextChar >> ifNextCharMatches '&' DoubleAmpersand Ampersand >>= give
       '<' -> tossNextChar >> readLessThanToken >>= give
@@ -116,6 +124,7 @@ readPlusToken = do
   nextChar <- peekNextChar
   case nextChar of
     Just '+' -> tossNextChar >> return Increment
+    Just '=' -> tossNextChar >> return PlusAssign
     _ -> return Plus
 
 
@@ -124,6 +133,7 @@ readMinusToken = do
   nextChar <- peekNextChar
   case nextChar of
     Just '-' -> tossNextChar >> return Decrement
+    Just '=' -> tossNextChar >> return MinusAssign
     _ -> return Minus
 
 
@@ -131,7 +141,7 @@ readLessThanToken :: Lexer Token
 readLessThanToken = do
   nextChar <- peekNextChar
   case nextChar of
-    Just '<' -> tossNextChar >> return ShiftLeft
+    Just '<' -> tossNextChar >> ifNextCharMatches '=' ShiftLeftAssign ShiftLeft
     Just '=' -> tossNextChar >> return LessThanEqual
     _ -> return LessThan
 
@@ -140,7 +150,7 @@ readGreaterThanToken :: Lexer Token
 readGreaterThanToken = do
   nextChar <- peekNextChar
   case nextChar of
-    Just '>' -> tossNextChar >> return ShiftRight
+    Just '>' -> tossNextChar >> ifNextCharMatches '=' ShiftRightAssign ShiftRight
     Just '=' -> tossNextChar >> return GreaterThanEqual
     _ -> return GreaterThan
 

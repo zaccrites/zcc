@@ -83,21 +83,6 @@ resolveExprVars funcName (VariableExpression name) = do
 
 resolveExprVars _ expr@(ConstantExpression _) = return expr
 
-resolveExprVars funcName (AssignmentExpression (VariableExpression name) expr) = do
-  (uniqueVarName, isNew) <- getUniqueVarName funcName name
-  when isNew $ do
-    let msg = "undeclared variable '" ++ name ++ "' in function '" ++ funcName ++ "'"
-    tell [msg]
-  expr' <- resolveExprVars funcName expr
-  return $ AssignmentExpression (VariableExpression uniqueVarName) expr'
-
--- TODO: this won't always be true: e.g. "*x++ = 10;"
-resolveExprVars funcName (AssignmentExpression leftExpr expr) = do
-  let msg = "assignment to non-variable" ++ show leftExpr ++ "' in function '" ++ funcName ++ "'"
-  tell [msg]
-  expr' <- resolveExprVars funcName expr
-  return $ AssignmentExpression leftExpr expr'
-
 
 -- TODO: emit errors in these functions if the name is missing or already exists?
 getUniqueVarName :: Identifier -> Identifier -> VarResolver (Identifier, Bool)

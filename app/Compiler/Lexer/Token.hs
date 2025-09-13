@@ -39,6 +39,16 @@ data Token
   | NotEqual
   | Exclamation
   | Assign
+  | PlusAssign
+  | MinusAssign
+  | AsteriskAssign
+  | SlashAssign
+  | PercentAssign
+  | AmpersandAssign
+  | PipeAssign
+  | CaretAssign
+  | ShiftLeftAssign
+  | ShiftRightAssign
   | Semicolon
   | EndOfFile
   deriving (Show, Eq)
@@ -77,5 +87,15 @@ tokenToString token  = case token of
   Equal -> "=="
   NotEqual -> "!="
   Assign -> "="
+  PlusAssign -> "+="
+  MinusAssign -> "-="
+  AsteriskAssign -> "*="
+  SlashAssign -> "/="
+  PercentAssign -> "%="
+  AmpersandAssign -> "&="
+  PipeAssign -> "|="
+  CaretAssign -> "^="
+  ShiftLeftAssign -> "<<="
+  ShiftRightAssign -> ">>="
   EndOfFile -> "<EOF>"
 

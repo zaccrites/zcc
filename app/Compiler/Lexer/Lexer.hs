@@ -5,6 +5,7 @@ module Compiler.Lexer.Lexer (
   Lexer,
   emitLexerError,
   consumeSpace,
+  consumeComment,
   takeNextChar,
   tossNextChar,
   peekNextChar,
@@ -33,8 +34,36 @@ emitLexerError message = do
   put current { errors = current.errors ++ [err] }
 
 
-consumeSpace :: Lexer ()
-consumeSpace = void (takeCharsWhile isSpace)
+consumeSpace :: Lexer Bool
+consumeSpace = do
+  xs <- takeCharsWhile isSpace
+  return . not . null $ xs
+
+
+consumeComment :: Lexer Bool
+consumeComment = do
+  nextChars <- peekNextTwoChars
+  case nextChars of
+    Just ('/', '/') -> toss2 >> consumeLine >> return True
+    Just ('/', '*') -> toss2 >> consumeMultiLineComment >> return True
+    _ -> return False
+  where
+    toss2 = tossNextChar >> tossNextChar
+    consumeMultiLineComment = do
+      nextChars <- peekNextTwoChars
+      case nextChars of
+        Just ('*', '/') -> toss2
+        Just _ -> tossNextChar >> consumeMultiLineComment
+        _ -> return ()
+
+
+consumeLine :: Lexer ()
+consumeLine = do
+  c <- takeNextChar
+  case c of
+    Just '\n' -> return ()
+    Just _ -> consumeLine
+    _ -> return ()
 
 
 takeCharsWhile :: (Char -> Bool) -> Lexer [Char]
@@ -55,6 +84,14 @@ peekNextChar = do
   current <- get
   return $ case current.text of
     (x:_) -> Just x
+    _ -> Nothing
+
+
+peekNextTwoChars :: Lexer (Maybe (Char, Char))
+peekNextTwoChars = do
+  current <- get
+  return $ case current.text of
+    (x:y:_) -> Just (x, y)
     _ -> Nothing
 
 
