@@ -19,7 +19,6 @@ import Control.Monad.State (StateT (..), get, put)
 import Control.Monad.Identity (Identity (..))
 
 import Compiler.Parser.Parser
-import Text.Read (Lexeme(Ident))
 
 
 type Identifier = String
@@ -139,6 +138,41 @@ genStmtIrInstructions (ReturnStatement expr) = do
 genStmtIrInstructions (ExpressionStatement expr) = do
   (instructions, _) <- genExprIrInstructions expr
   return instructions
+
+genStmtIrInstructions (CompoundStatement stmts) =
+  concat <$> mapM genStmtIrInstructions stmts
+
+genStmtIrInstructions (IfStatement expr stmt Nothing) = do
+  (exprInstructions, exprValue) <- genExprIrInstructions expr
+  stmtInstructions <- genStmtIrInstructions stmt
+  endLabelName <- getNewLabelName "ifEnd"
+  return
+    (
+      exprInstructions ++
+      [IrJump (IrJumpIfZero exprValue) endLabelName] ++
+      stmtInstructions ++
+      [IrLabel endLabelName]
+    )
+
+
+genStmtIrInstructions (IfStatement expr stmt (Just elseStmt)) = do
+  (exprInstructions, exprValue) <- genExprIrInstructions expr
+  stmtInstructions <- genStmtIrInstructions stmt
+  elseStmtInstructions <- genStmtIrInstructions elseStmt
+  elseLabelName <- getNewLabelName "ifElse"
+  endLabelName <- getNewLabelName "ifEnd"
+  return
+    (
+      exprInstructions ++
+      [IrJump (IrJumpIfZero exprValue) elseLabelName] ++
+      stmtInstructions ++
+      [ IrJump IrJumpAlways endLabelName
+      , IrLabel elseLabelName
+      ] ++
+      elseStmtInstructions ++
+      [IrLabel endLabelName]
+    )
+
 
 genStmtIrInstructions NullStatement = return []
 
@@ -296,6 +330,28 @@ genExprIrInstructions (BinaryExpression op left right) = do
       GreaterThanEqual -> IrGreaterThanEqual
       Equal -> IrEqual
       NotEqual -> IrNotEqual
+
+
+genExprIrInstructions (ConditionalExpression cond ifTrue ifFalse) = do
+  (condInstructions, condValue) <- genExprIrInstructions cond
+  (ifTrueInstructions, ifTrueValue) <- genExprIrInstructions ifTrue
+  (ifFalseInstructions, ifFalseValue) <- genExprIrInstructions ifFalse
+  falseLabelName <- getNewLabelName "condtionalFalse"
+  endLabelName <- getNewLabelName "condtionalEnd"
+  outputName <- getNewTempVarName
+  let instructions =
+        condInstructions ++
+        [ IrJump (IrJumpIfZero condValue) falseLabelName ] ++
+        ifTrueInstructions ++
+        [ IrCopy ifTrueValue (IrWriteVar outputName)
+        , IrJump IrJumpAlways endLabelName
+        , IrLabel falseLabelName
+        ] ++
+        ifFalseInstructions ++
+        [ IrCopy ifFalseValue (IrWriteVar outputName)
+        , IrLabel endLabelName
+        ]
+  return (instructions, IrReadVar outputName)
 
 
 data AssignmentType

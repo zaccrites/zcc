@@ -57,6 +57,8 @@ getNextToken = do
       '}' -> give' CloseBrace
       ';' -> give' Semicolon
       '~' -> give' Tilde
+      '?' -> give' QuestionMark
+      ':' -> give' Colon
       '+' -> tossNextChar >> readPlusToken >>= give
       '-' -> tossNextChar >> readMinusToken >>= give
       '*' -> tossNextChar >> ifNextCharMatches '=' AsteriskAssign Asterisk >>= give

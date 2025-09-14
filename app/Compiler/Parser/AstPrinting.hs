@@ -8,6 +8,7 @@ import Compiler.Parser.Parser
 
 import Control.Monad.State (StateT (..))
 import Control.Monad.Identity (Identity (..))
+import Data.Maybe (isJust, fromMaybe)
 
 
 type IndentLevel = Int
@@ -34,30 +35,58 @@ instance AstPrintNode FuncDef where
 
 
 instance AstPrintNode BlockItem where
-  getAstNodeDescription (BlockItemDeclaration (VariableDeclaration name _)) =
-    "VariableDeclaration : int " ++ name
-  getAstNodeDescription (BlockItemStatement NullStatement) = "NullStatement"
-  getAstNodeDescription (BlockItemStatement (ReturnStatement _)) = "ReturnStatement"
-  getAstNodeDescription (BlockItemStatement (ExpressionStatement _)) = "ExpressionStatement"
+  getAstNodeDescription (BlockItemStatement stmt) = getAstNodeDescription stmt
+  getAstNodeDescription (BlockItemDeclaration decl) = getAstNodeDescription decl
 
-  getAstSubnodeLines (BlockItemStatement NullStatement) = return []
-  getAstSubnodeLines (BlockItemStatement (ReturnStatement expr)) = printAstNode expr
-  getAstSubnodeLines (BlockItemStatement (ExpressionStatement expr)) = printAstNode expr
-  getAstSubnodeLines (BlockItemDeclaration (VariableDeclaration _ initExpr)) =
+  getAstSubnodeLines (BlockItemStatement decl) = getAstSubnodeLines decl
+  getAstSubnodeLines (BlockItemDeclaration decl) = getAstSubnodeLines decl
+
+
+instance AstPrintNode Declaration where
+  getAstNodeDescription (VariableDeclaration name _) =
+    "VariableDeclaration : int " ++ name
+  getAstSubnodeLines (VariableDeclaration _ initExpr) =
     maybe (return []) printAstNode initExpr
+
+
+instance AstPrintNode Statement where
+  getAstNodeDescription NullStatement = "NullStatement"
+  getAstNodeDescription (ReturnStatement _) = "ReturnStatement"
+  getAstNodeDescription (ExpressionStatement _) = "ExpressionStatement"
+  getAstNodeDescription (CompoundStatement stmts) =
+    "CompoundStatement (" ++ show (length stmts) ++ ")"
+  getAstNodeDescription (IfStatement _ _ elseStmt) =
+    "IfStatement" ++ (if isJust elseStmt then " (if/else)" else "")
+
+  getAstSubnodeLines NullStatement = return []
+  getAstSubnodeLines (ReturnStatement expr) = printAstNode expr
+  getAstSubnodeLines (ExpressionStatement expr) = printAstNode expr
+  getAstSubnodeLines (CompoundStatement stmts) = do
+    concat <$> mapM printAstNode stmts
+  getAstSubnodeLines (IfStatement expr stmt elseStmt) = do
+    exprLines <- printAstNode expr
+    stmtLines <- printAstNode stmt
+    elseStmtLines <- traverse printAstNode elseStmt
+    return $ concat [exprLines, stmtLines, fromMaybe [] elseStmtLines]
 
 
 instance AstPrintNode Expression where
   getAstNodeDescription (UnaryExpression op _) = "UnaryExpression : " ++ show op
   getAstNodeDescription (BinaryExpression op _ _) = "BinaryExpression : " ++ show op
   getAstNodeDescription (VariableExpression name) = "VariableExpression : '" ++ name ++ "'"
-  getAstNodeDescription x = show x
+  getAstNodeDescription (ConstantExpression value) = "ConstantExpression : " ++ show value
+  getAstNodeDescription (ConditionalExpression {}) = "ConditionalExpression"
 
   getAstSubnodeLines (UnaryExpression _ expr) = printAstNode expr
   getAstSubnodeLines (BinaryExpression _ left right) = do
     leftLines <- printAstNode left
     rightLines <- printAstNode right
     return $ leftLines ++ rightLines
+  getAstSubnodeLines (ConditionalExpression cond ifTrue ifFalse) = do
+    condLines <- printAstNode cond
+    ifTrueLines <- printAstNode ifTrue
+    ifFalseLines <- printAstNode ifFalse
+    return $ concat [condLines, ifTrueLines, ifFalseLines]
   getAstSubnodeLines _ = return []
 
 

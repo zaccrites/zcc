@@ -50,6 +50,8 @@ data Token
   | ShiftLeftAssign
   | ShiftRightAssign
   | Semicolon
+  | QuestionMark
+  | Colon
   | EndOfFile
   deriving (Show, Eq)
 
@@ -97,5 +99,7 @@ tokenToString token  = case token of
   CaretAssign -> "^="
   ShiftLeftAssign -> "<<="
   ShiftRightAssign -> ">>="
+  QuestionMark -> "?"
+  Colon -> ":"
   EndOfFile -> "<EOF>"
 

@@ -19,6 +19,8 @@ readIdentifierOrKeyword = do
     "int" -> Keyword KeywordInt
     "void" -> Keyword KeywordVoid
     "return" -> Keyword KeywordReturn
+    "if" -> Keyword KeywordIf
+    "else" -> Keyword KeywordElse
     xs -> Identifier xs
 
 

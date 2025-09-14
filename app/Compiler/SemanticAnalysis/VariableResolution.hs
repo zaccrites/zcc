@@ -41,30 +41,55 @@ resolveVariables' (FuncDef funcName blockItems) = do
   where
     go :: [BlockItem] -> VarResolver [BlockItem]
     go [] = return []
-    go (BlockItemDeclaration (VariableDeclaration varName initExpr):xs) = do
-      (uniqueVarName, isNewVarName) <- declareUniqueVarName funcName varName
-      unless isNewVarName $ do
-        let msg = "variable '" ++ varName ++ "' was already declared in function '" ++ funcName ++ "'"
-        tell [msg]
 
-      initExpr' <- traverse (resolveExprVars funcName) initExpr
-      let item = BlockItemDeclaration (VariableDeclaration uniqueVarName initExpr')
+    go (BlockItemDeclaration decl : xs) = do
+      decl' <- resolveDeclVars funcName decl
+      let item = BlockItemDeclaration decl'
       (item :) <$> go xs
 
-    go (BlockItemStatement (ReturnStatement expr):xs) = do
-      expr' <- resolveExprVars funcName expr
-      let item = BlockItemStatement (ReturnStatement expr')
-      (item :) <$> go xs
-
-    go (x@(BlockItemStatement NullStatement):xs) = (x :) <$> go xs
-
-    go (BlockItemStatement (ExpressionStatement expr):xs) = do
-      expr' <- resolveExprVars funcName expr
-      let item = BlockItemStatement (ExpressionStatement expr')
+    go (BlockItemStatement stmt : xs) = do
+      stmt' <- resolveStmtVars funcName stmt
+      let item = BlockItemStatement stmt'
       (item :) <$> go xs
 
 
 -- TODO: use a reader monad for e.g. the function name
+
+resolveDeclVars :: Identifier -> Declaration -> VarResolver Declaration
+resolveDeclVars funcName (VariableDeclaration varName initExpr) = do
+  (uniqueVarName, isNewVarName) <- declareUniqueVarName funcName varName
+  unless isNewVarName $ do
+    let msg = "variable '" ++ varName ++ "' was already declared in function '" ++ funcName ++ "'"
+    tell [msg]
+
+  initExpr' <- traverse (resolveExprVars funcName) initExpr
+  return $ VariableDeclaration uniqueVarName initExpr'
+
+
+resolveStmtVars :: Identifier -> Statement -> VarResolver Statement
+resolveStmtVars funcName (ReturnStatement expr) =
+  ReturnStatement <$> resolveExprVars funcName expr
+
+resolveStmtVars _ NullStatement = return NullStatement
+
+resolveStmtVars funcName (ExpressionStatement expr) =
+  ExpressionStatement <$> resolveExprVars funcName expr
+
+resolveStmtVars funcName (CompoundStatement stmts) =
+  CompoundStatement . reverse <$> go stmts
+  where
+    go :: [Statement] -> VarResolver [Statement]
+    go [] = return []
+    go (x:xs) = do
+      x' <- resolveStmtVars funcName x
+      (x' : ) <$> go xs
+
+resolveStmtVars funcName (IfStatement expr stmt elseStmt) = do
+  expr' <- resolveExprVars funcName expr
+  stmt' <- resolveStmtVars funcName stmt
+  elseStmt' <- traverse (resolveStmtVars funcName) elseStmt
+  return $ IfStatement expr' stmt' elseStmt'
+
 
 resolveExprVars :: Identifier -> Expression -> VarResolver Expression
 resolveExprVars funcName (UnaryExpression op expr) =
@@ -80,6 +105,12 @@ resolveExprVars funcName (VariableExpression name) = do
     let msg = "undeclared variable '" ++ name ++ "' in function '" ++ funcName ++ "'"
     tell [msg]
   return $ VariableExpression uniqueVarName
+
+resolveExprVars funcName (ConditionalExpression cond ifTrue ifFalse) = do
+  cond' <- resolveExprVars funcName cond
+  ifTrue' <- resolveExprVars funcName ifTrue
+  ifFalse' <- resolveExprVars funcName ifFalse
+  return $ ConditionalExpression cond' ifTrue' ifFalse'
 
 resolveExprVars _ expr@(ConstantExpression _) = return expr
 

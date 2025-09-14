@@ -43,14 +43,17 @@ data BlockItem
 data Statement
   = ReturnStatement Expression
   | ExpressionStatement Expression
+  | IfStatement Expression Statement (Maybe Statement)
+  | CompoundStatement [Statement]
   | NullStatement
   deriving (Show)
 
 data Expression
   = ConstantExpression Integer
+  | VariableExpression Identifier
   | UnaryExpression UnaryOperator Expression
   | BinaryExpression BinaryOperator Expression Expression
-  | VariableExpression Identifier
+  | ConditionalExpression Expression Expression Expression
   deriving (Show)
 
 data Declaration
@@ -212,15 +215,54 @@ parseStatement = do
   source@(SourceToken nextToken _) <- peekNextToken
   case nextToken of
     Tokens.Semicolon -> tossNextToken >> return NullStatement
-    Tokens.Keyword KeywordReturn -> do
-      tossNextToken
-      expr <- parseExpression
-      expectToken Tokens.Semicolon
-      return $ ReturnStatement expr
+    Tokens.OpenBrace -> parseCompoundStatement
+    Tokens.Keyword KeywordIf -> parseIfStatement
+    Tokens.Keyword KeywordReturn -> parseReturnStatement
     _ -> do
       expr <- parseExpression
       expectToken Tokens.Semicolon
       return $ ExpressionStatement expr
+
+
+-- FUTURE: Build a "manyTill" combinator to use instead.
+parseCompoundStatement :: MaybeParser Statement
+parseCompoundStatement = do
+  expectToken Tokens.OpenBrace
+  stmts <- go []
+  return $ CompoundStatement (reverse stmts)
+  where
+    go :: [Statement] -> MaybeParser [Statement]
+    go stmts = do
+      SourceToken nextToken _ <- peekNextToken
+      case nextToken of
+        Tokens.CloseBrace -> tossNextToken >> return stmts
+        _ -> do
+          stmt <- parseStatement
+          go (stmt : stmts)
+
+
+parseReturnStatement :: MaybeParser Statement
+parseReturnStatement = do
+  expectKeyword KeywordReturn
+  expr <- parseExpression
+  expectToken Tokens.Semicolon
+  return $ ReturnStatement expr
+
+
+parseIfStatement :: MaybeParser Statement
+parseIfStatement = do
+  expectKeyword KeywordIf
+  expectToken Tokens.OpenParen
+  expr <- parseExpression
+  expectToken Tokens.CloseParen
+  stmt <- parseStatement
+
+  SourceToken nextToken _ <- peekNextToken
+  elseStmt <- case nextToken of
+    Tokens.Keyword KeywordElse -> tossNextToken >> Just <$> parseStatement
+    _ -> return Nothing
+
+  return $ IfStatement expr stmt elseStmt
 
 
 parseExpression :: MaybeParser Expression
@@ -240,17 +282,30 @@ parseExpression = go 0
     go' :: Int -> Expression -> MaybeParser Expression
     go' minPrec left = do
       SourceToken token _ <- peekNextToken
-      case getBinaryOperator token of
-        Just op -> do
-          let prec = getBinaryOperatorPrecedence op
-          if prec >= minPrec
-            then do
-              tossNextToken
-              right <- go (nextPrec op prec)
-              let left' = BinaryExpression op left right
-              go' minPrec left'
-            else return left
-        Nothing -> return left
+      case token of
+        -- FUTURE: find a better way to handle this ugly duplication
+        Tokens.QuestionMark -> do
+            let prec = getBinaryOperatorPrecedence Assign + 1
+            if prec >= minPrec
+              then do
+                tossNextToken
+                middle <- go 0
+                expectToken Tokens.Colon
+                right <- go prec
+                let left' = ConditionalExpression left middle right
+                go' minPrec left'
+              else return left
+        _ -> case getBinaryOperator token of
+          Just op -> do
+            let prec = getBinaryOperatorPrecedence op
+            if prec >= minPrec
+              then do
+                tossNextToken
+                right <- go (nextPrec op prec)
+                let left' = BinaryExpression op left right
+                go' minPrec left'
+              else return left
+          Nothing -> return left
 
     nextPrec :: BinaryOperator -> Int -> Int
     nextPrec op prec
