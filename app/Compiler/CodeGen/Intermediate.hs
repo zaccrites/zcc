@@ -119,6 +119,13 @@ genBlockItemIrInstructions :: BlockItem -> IrGen [IrInstruction]
 genBlockItemIrInstructions item = case item of
   BlockItemStatement stmt -> genStmtIrInstructions stmt
   BlockItemDeclaration decl -> genDeclIrInstructions decl
+  BlockItemLabel name -> genLabelIrInstructions name
+
+
+genLabelIrInstructions :: Identifier -> IrGen [IrInstruction]
+genLabelIrInstructions labelName = do
+  let name = makeFuncLocalLabelName labelName
+  return [IrLabel name]
 
 
 genDeclIrInstructions :: Declaration -> IrGen [IrInstruction]
@@ -175,6 +182,9 @@ genStmtIrInstructions (IfStatement expr stmt (Just elseStmt)) = do
 
 
 genStmtIrInstructions NullStatement = return []
+
+genStmtIrInstructions (GotoStatement name) =
+  return [IrJump IrJumpAlways (makeFuncLocalLabelName name)]
 
 
 genExprIrInstructions :: Expression -> IrGen ([IrInstruction], IrReadValue)
@@ -405,4 +415,8 @@ getNewLabelName prefix = do
   (tempVarCount, labelCount) <- get
   put (tempVarCount, labelCount + 1)
   return $ ".L_" ++ prefix ++ "." ++ show (labelCount + 1)
+
+
+makeFuncLocalLabelName :: Identifier -> Identifier
+makeFuncLocalLabelName labelName = ".L_" ++ labelName
 

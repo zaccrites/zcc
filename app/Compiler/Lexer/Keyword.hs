@@ -12,6 +12,7 @@ data Keyword
   | KeywordReturn
   | KeywordIf
   | KeywordElse
+  | KeywordGoto
   deriving (Show, Eq)
 
 
@@ -22,4 +23,5 @@ keywordToString keyword = case keyword of
   KeywordReturn -> "return"
   KeywordIf -> "if"
   KeywordElse -> "else"
+  KeywordGoto -> "goto"
 

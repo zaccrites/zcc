@@ -38,6 +38,7 @@ data FuncDef = FuncDef Identifier [BlockItem] deriving (Show)
 data BlockItem
   = BlockItemStatement Statement
   | BlockItemDeclaration Declaration
+  | BlockItemLabel Identifier
   deriving (Show)
 
 data Statement
@@ -45,6 +46,7 @@ data Statement
   | ExpressionStatement Expression
   | IfStatement Expression Statement (Maybe Statement)
   | CompoundStatement [Statement]
+  | GotoStatement Identifier
   | NullStatement
   deriving (Show)
 
@@ -185,9 +187,19 @@ parseFuncDef = do
 
 parseBlockItem :: MaybeParser BlockItem
 parseBlockItem = do
-  SourceToken nextToken _ <- peekNextToken
+  source@(SourceToken nextToken _) <- peekNextToken
   case nextToken of
     Tokens.Keyword KeywordInt -> BlockItemDeclaration <$> parseDeclaration
+
+    Tokens.Identifier name -> do
+      tossNextToken
+      SourceToken nextToken' _ <- peekNextToken
+      case nextToken' of
+        Tokens.Colon -> tossNextToken >> return (BlockItemLabel name)
+        _ -> do
+          putBackToken source
+          BlockItemStatement <$> parseStatement
+
     _ -> BlockItemStatement <$> parseStatement
 
 
@@ -218,10 +230,14 @@ parseStatement = do
     Tokens.OpenBrace -> parseCompoundStatement
     Tokens.Keyword KeywordIf -> parseIfStatement
     Tokens.Keyword KeywordReturn -> parseReturnStatement
+    Tokens.Keyword KeywordGoto -> parseGotoStatement
     _ -> do
       expr <- parseExpression
       expectToken Tokens.Semicolon
       return $ ExpressionStatement expr
+
+
+
 
 
 -- FUTURE: Build a "manyTill" combinator to use instead.
@@ -249,6 +265,14 @@ parseReturnStatement = do
   return $ ReturnStatement expr
 
 
+parseGotoStatement :: MaybeParser Statement
+parseGotoStatement = do
+  expectKeyword KeywordGoto
+  name <- getIdentifier
+  expectToken Tokens.Semicolon
+  return $ GotoStatement name
+
+
 parseIfStatement :: MaybeParser Statement
 parseIfStatement = do
   expectKeyword KeywordIf
@@ -269,14 +293,7 @@ parseExpression :: MaybeParser Expression
 parseExpression = go 0
   where
     go :: Int -> MaybeParser Expression
-    go minPrec = do
-      expr <- parseFactor >>= go' minPrec
-      SourceToken nextToken _ <- peekNextToken
-      let returnUnary op = tossNextToken >> return (UnaryExpression op expr)
-      case nextToken of
-        Tokens.Increment -> returnUnary PostfixIncrement
-        Tokens.Decrement -> returnUnary PostfixDecrement
-        _ -> return expr
+    go minPrec = parseFactor >>= go' minPrec
 
     -- Use precedence climbing to parse a binary expression.
     go' :: Int -> Expression -> MaybeParser Expression
@@ -351,14 +368,22 @@ parseFactor :: MaybeParser Expression
 parseFactor = do
   source@(SourceToken token _) <- getNextToken
   case token of
-    Tokens.Constant value -> MaybeT . return . Just $ ConstantExpression value
+    Tokens.Constant value -> return (ConstantExpression value)
     Tokens.Minus -> parseUnaryExpression Negate
     Tokens.Tilde -> parseUnaryExpression BitwiseComplement
     Tokens.Exclamation -> parseUnaryExpression LogicalNot
     Tokens.Increment -> parseUnaryExpression PrefixIncrement
     Tokens.Decrement -> parseUnaryExpression PrefixDecrement
     Tokens.OpenParen -> parseParenthesizedExpression
-    Tokens.Identifier name -> MaybeT . return . Just $ VariableExpression name
+    Tokens.Identifier name -> do
+      SourceToken token2 _ <- peekNextToken
+      let var = VariableExpression name
+      let makeUnary op = tossNextToken >> return (UnaryExpression op var)
+      case token2 of
+        Tokens.Increment -> makeUnary PostfixIncrement
+        Tokens.Decrement -> makeUnary PostfixDecrement
+        _ -> return var
+
     x -> do
       let message = "unexpected token \"" ++ show x ++ "\" (parseFactor)"
       tell [ParserError {message=message, token=source}]
@@ -421,4 +446,11 @@ peekNextToken = MaybeT do
 
 tossNextToken :: MaybeParser ()
 tossNextToken = void getNextToken
+
+
+putBackToken :: SourceToken -> MaybeParser ()
+putBackToken token = MaybeT do
+  tokens <- get
+  put $ token : tokens
+  return $ Just ()
 

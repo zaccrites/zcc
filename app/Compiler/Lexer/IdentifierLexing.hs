@@ -21,6 +21,7 @@ readIdentifierOrKeyword = do
     "return" -> Keyword KeywordReturn
     "if" -> Keyword KeywordIf
     "else" -> Keyword KeywordElse
+    "goto" -> Keyword KeywordGoto
     xs -> Identifier xs
 
 

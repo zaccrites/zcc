@@ -52,6 +52,8 @@ resolveVariables' (FuncDef funcName blockItems) = do
       let item = BlockItemStatement stmt'
       (item :) <$> go xs
 
+    go (item@(BlockItemLabel _) : xs) = (item :) <$> go xs
+
 
 -- TODO: use a reader monad for e.g. the function name
 
@@ -67,6 +69,9 @@ resolveDeclVars funcName (VariableDeclaration varName initExpr) = do
 
 
 resolveStmtVars :: Identifier -> Statement -> VarResolver Statement
+
+resolveStmtVars _ stmt@(GotoStatement _) = return stmt
+
 resolveStmtVars funcName (ReturnStatement expr) =
   ReturnStatement <$> resolveExprVars funcName expr
 

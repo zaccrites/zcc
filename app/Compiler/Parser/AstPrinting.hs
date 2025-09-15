@@ -37,9 +37,11 @@ instance AstPrintNode FuncDef where
 instance AstPrintNode BlockItem where
   getAstNodeDescription (BlockItemStatement stmt) = getAstNodeDescription stmt
   getAstNodeDescription (BlockItemDeclaration decl) = getAstNodeDescription decl
+  getAstNodeDescription (BlockItemLabel name) = name ++ ":"
 
   getAstSubnodeLines (BlockItemStatement decl) = getAstSubnodeLines decl
   getAstSubnodeLines (BlockItemDeclaration decl) = getAstSubnodeLines decl
+  getAstSubnodeLines (BlockItemLabel _) = return []
 
 
 instance AstPrintNode Declaration where
@@ -51,6 +53,7 @@ instance AstPrintNode Declaration where
 
 instance AstPrintNode Statement where
   getAstNodeDescription NullStatement = "NullStatement"
+  getAstNodeDescription (GotoStatement name) = "GotoStatement : '" ++ name ++ "'"
   getAstNodeDescription (ReturnStatement _) = "ReturnStatement"
   getAstNodeDescription (ExpressionStatement _) = "ExpressionStatement"
   getAstNodeDescription (CompoundStatement stmts) =
@@ -59,6 +62,7 @@ instance AstPrintNode Statement where
     "IfStatement" ++ (if isJust elseStmt then " (if/else)" else "")
 
   getAstSubnodeLines NullStatement = return []
+  getAstSubnodeLines (GotoStatement _) = return []
   getAstSubnodeLines (ReturnStatement expr) = printAstNode expr
   getAstSubnodeLines (ExpressionStatement expr) = printAstNode expr
   getAstSubnodeLines (CompoundStatement stmts) = do
