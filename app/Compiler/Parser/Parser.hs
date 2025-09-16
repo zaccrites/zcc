@@ -10,6 +10,7 @@ module Compiler.Parser.Parser (
   Expression (..),
   UnaryOperator (..),
   BinaryOperator (..),
+  Block,
   BlockItem (..),
   Declaration (..),
 )
@@ -32,8 +33,7 @@ import Control.Monad (void)
 type Identifier = String
 
 data Program = Program FuncDef deriving (Show)
-
-data FuncDef = FuncDef Identifier [BlockItem] deriving (Show)
+data FuncDef = FuncDef Identifier Block deriving (Show)
 
 data BlockItem
   = BlockItemStatement Statement
@@ -41,11 +41,13 @@ data BlockItem
   | BlockItemLabel Identifier
   deriving (Show)
 
+type Block = [BlockItem]
+
 data Statement
   = ReturnStatement Expression
   | ExpressionStatement Expression
   | IfStatement Expression Statement (Maybe Statement)
-  | CompoundStatement [Statement]
+  | CompoundStatement Block
   | GotoStatement Identifier
   | NullStatement
   deriving (Show)
@@ -244,17 +246,17 @@ parseStatement = do
 parseCompoundStatement :: MaybeParser Statement
 parseCompoundStatement = do
   expectToken Tokens.OpenBrace
-  stmts <- go []
-  return $ CompoundStatement (reverse stmts)
+  items <- go []
+  return $ CompoundStatement (reverse items)
   where
-    go :: [Statement] -> MaybeParser [Statement]
-    go stmts = do
+    go :: Block -> MaybeParser Block
+    go items = do
       SourceToken nextToken _ <- peekNextToken
       case nextToken of
-        Tokens.CloseBrace -> tossNextToken >> return stmts
+        Tokens.CloseBrace -> tossNextToken >> return items
         _ -> do
-          stmt <- parseStatement
-          go (stmt : stmts)
+          item <- parseBlockItem
+          go (item : items)
 
 
 parseReturnStatement :: MaybeParser Statement

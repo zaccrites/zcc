@@ -1,9 +1,8 @@
 {-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
 module Main(main) where
 
-import System.Exit (ExitCode (..), exitWith, exitSuccess)
+import System.Exit (ExitCode (..), exitWith)
 
 import Control.Monad (forM_, when)
 import Compiler.Lexer.Tokenizer
@@ -59,7 +58,7 @@ doLexProgram text = do
 
 doParseProgram :: [SourceToken] -> IO ExitCode
 doParseProgram tokens = do
-  let (program, parserErrors, tokens') = parseProgram tokens
+  let (program, parserErrors, _) = parseProgram tokens
   case program of
     Nothing -> do
       putStrLn "Parser Failed!"
@@ -99,7 +98,6 @@ doIrCodeGen program = do
   case irProgram of
     IrProgram (IrFuncDef _ instructions) ->
       forM_ (enumerate instructions) \(i, inst) -> putStrLn (show i ++ ": " ++ show inst)
-    _ -> print irProgram
   putStrLn "\n"
 
   doAsmCodeGen irProgram
@@ -113,7 +111,6 @@ doAsmCodeGen program = do
   case asmProgram of
     AsmProgram (AsmFuncDef _ _ instructions) ->
       forM_ (enumerate instructions) \(i, inst) -> putStrLn (show i ++ ": " ++ show inst)
-    _ -> print asmProgram
   putStrLn "\n"
 
   putStrLn "---------------------- ASM Text ----------------------"

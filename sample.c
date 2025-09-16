@@ -8,8 +8,10 @@ target:
 
   b += c;
   if (a-- > 0) {
-    c += 1;
+    int inc = 1;
+    c += inc;
     goto target;
+    int c = 10;  // not the same c as two lines earlier
   }
 
   return b;

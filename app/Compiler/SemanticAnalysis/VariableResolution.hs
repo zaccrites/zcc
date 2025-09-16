@@ -1,5 +1,6 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
+
 module Compiler.SemanticAnalysis.VariableResolution (
   resolveVariables,
   VarResolverError,
@@ -12,14 +13,14 @@ import Control.Monad.Identity (Identity (..))
 import Control.Monad.Writer (WriterT (..), MonadWriter (tell))
 
 import Compiler.Parser.Parser
-import Control.Monad (when, unless)
 
 
 type Identifier = String
 
 type VariableCounter = Integer
-type Variables = Map.Map Identifier Identifier
-type VarResolverState = (VariableCounter, Variables)
+type Scope = Map.Map Identifier Identifier
+type ScopeStack = [Scope]
+type VarResolverState = (VariableCounter, ScopeStack)
 
 type VarResolverError = String
 type VarResolver = VarResolverT Identity
@@ -29,65 +30,54 @@ type VarResolverT m = WriterT [VarResolverError] (StateT VarResolverState m)
 resolveVariables :: FuncDef -> (FuncDef, [VarResolverError])
 resolveVariables func = (func', errors)
   where
-    initState = (0, Map.empty)
+    initState = (0, [])
     ((func', errors), _) = runIdentity $ runStateT (runWriterT $ resolveVariables' func) initState
 
 
 resolveVariables' :: FuncDef -> VarResolver FuncDef
-resolveVariables' (FuncDef funcName blockItems) = do
-  blockItems' <- go blockItems
-  return $ FuncDef funcName blockItems'
-
-  where
-    go :: [BlockItem] -> VarResolver [BlockItem]
-    go [] = return []
-
-    go (BlockItemDeclaration decl : xs) = do
-      decl' <- resolveDeclVars funcName decl
-      let item = BlockItemDeclaration decl'
-      (item :) <$> go xs
-
-    go (BlockItemStatement stmt : xs) = do
-      stmt' <- resolveStmtVars funcName stmt
-      let item = BlockItemStatement stmt'
-      (item :) <$> go xs
-
-    go (item@(BlockItemLabel _) : xs) = (item :) <$> go xs
-
+resolveVariables' (FuncDef funcName block) =
+  FuncDef funcName <$> resolveBlockVars funcName block
 
 -- TODO: use a reader monad for e.g. the function name
 
 resolveDeclVars :: Identifier -> Declaration -> VarResolver Declaration
 resolveDeclVars funcName (VariableDeclaration varName initExpr) = do
-  (uniqueVarName, isNewVarName) <- declareUniqueVarName funcName varName
-  unless isNewVarName $ do
-    let msg = "variable '" ++ varName ++ "' was already declared in function '" ++ funcName ++ "'"
-    tell [msg]
-
+  uniqueVarName <- declareUniqueVarName funcName varName
   initExpr' <- traverse (resolveExprVars funcName) initExpr
   return $ VariableDeclaration uniqueVarName initExpr'
 
 
-resolveStmtVars :: Identifier -> Statement -> VarResolver Statement
+resolveBlockVars :: Identifier -> Block -> VarResolver Block
+resolveBlockVars funcName block = do
+  pushScopeStack
+  items <- mapM (resolveBlockItemVars funcName) block
+  popScopeStack
+  return items
 
+
+resolveBlockItemVars :: Identifier -> BlockItem -> VarResolver BlockItem
+resolveBlockItemVars _ item@(BlockItemLabel _) = return item
+
+resolveBlockItemVars funcName (BlockItemDeclaration decl) = case decl of
+  VariableDeclaration _ _ -> BlockItemDeclaration <$> resolveDeclVars funcName decl
+
+resolveBlockItemVars funcName (BlockItemStatement stmt) =
+  BlockItemStatement <$> resolveStmtVars funcName stmt
+
+
+resolveStmtVars :: Identifier -> Statement -> VarResolver Statement
+resolveStmtVars _ stmt@NullStatement = return stmt
 resolveStmtVars _ stmt@(GotoStatement _) = return stmt
 
 resolveStmtVars funcName (ReturnStatement expr) =
   ReturnStatement <$> resolveExprVars funcName expr
 
-resolveStmtVars _ NullStatement = return NullStatement
 
 resolveStmtVars funcName (ExpressionStatement expr) =
   ExpressionStatement <$> resolveExprVars funcName expr
 
-resolveStmtVars funcName (CompoundStatement stmts) =
-  CompoundStatement . reverse <$> go stmts
-  where
-    go :: [Statement] -> VarResolver [Statement]
-    go [] = return []
-    go (x:xs) = do
-      x' <- resolveStmtVars funcName x
-      (x' : ) <$> go xs
+resolveStmtVars funcName (CompoundStatement block) =
+  CompoundStatement <$> resolveBlockVars funcName block
 
 resolveStmtVars funcName (IfStatement expr stmt elseStmt) = do
   expr' <- resolveExprVars funcName expr
@@ -105,10 +95,7 @@ resolveExprVars funcName (BinaryExpression op left right) = do
   return $ BinaryExpression op left' right'
 
 resolveExprVars funcName (VariableExpression name) = do
-  (uniqueVarName, isNew) <- getUniqueVarName funcName name
-  when isNew $ do
-    let msg = "undeclared variable '" ++ name ++ "' in function '" ++ funcName ++ "'"
-    tell [msg]
+  uniqueVarName <- getUniqueVarName funcName name
   return $ VariableExpression uniqueVarName
 
 resolveExprVars funcName (ConditionalExpression cond ifTrue ifFalse) = do
@@ -120,30 +107,58 @@ resolveExprVars funcName (ConditionalExpression cond ifTrue ifFalse) = do
 resolveExprVars _ expr@(ConstantExpression _) = return expr
 
 
--- TODO: emit errors in these functions if the name is missing or already exists?
-getUniqueVarName :: Identifier -> Identifier -> VarResolver (Identifier, Bool)
-getUniqueVarName = getUniqueVarNameImpl False
+pushScopeStack :: VarResolver ()
+pushScopeStack = do
+  (counter, stack) <- get
+  let stack' = Map.empty : stack
+  put (counter, stack')
 
-declareUniqueVarName :: Identifier -> Identifier -> VarResolver (Identifier, Bool)
-declareUniqueVarName = getUniqueVarNameImpl True
 
-getUniqueVarNameImpl :: Bool -> Identifier -> Identifier -> VarResolver (Identifier, Bool)
-getUniqueVarNameImpl declare funcName varName = do
-  (counter, vars) <- get
-  case Map.lookup varName vars of
-    Just uniqueVarName -> return (uniqueVarName, False)
-    Nothing -> do
-      let uniqueVarName = makeUniqueName counter
-      let vars' = makeNewVars uniqueVarName vars
-      put (counter + 1, vars')
-      return (uniqueVarName, True)
+popScopeStack :: VarResolver ()
+popScopeStack = do
+  (counter, stack) <- get
+  case stack of
+    (_ : stack') -> put (counter, stack')
+    [] -> put (counter, stack)
 
+
+-- TODO: Use ExceptT and just emit some kind of (VariableAlreadyExists Identifier) error type.
+
+getUniqueVarName :: Identifier -> Identifier -> VarResolver Identifier
+getUniqueVarName funcName varName = do
+  (_, stack) <- get
+  go stack
   where
-    makeUniqueName :: Integer -> Identifier
-    makeUniqueName counter = "." ++ funcName ++ "." ++ varName ++ "." ++ show counter
+    go :: ScopeStack -> VarResolver Identifier
+    go [] = do
+      -- Just make something up and emit an error.
+      tell ["no variable '" ++ varName ++ "' in scope in function '" ++ funcName ++ "'"]
+      makeUniqueVarName varName
+    go (vars : stack) = case Map.lookup varName vars of
+      Just uniqueVarName -> return uniqueVarName
+      Nothing -> go stack
 
-    makeNewVars :: Identifier -> Variables -> Variables
-    makeNewVars uniqueVarName vars = if declare
-      then Map.insert varName uniqueVarName vars
-      else vars
+
+declareUniqueVarName :: Identifier -> Identifier -> VarResolver Identifier
+declareUniqueVarName funcName varName = do
+  (_, stack) <- get
+  case stack of
+    (vars : _) -> case Map.lookup varName vars of
+      Just existingUniqueVarName -> do
+        tell ["a variable named '" ++ varName ++ "' already exists in scope in function '" ++ funcName ++ "'"]
+        return existingUniqueVarName
+      Nothing -> makeUniqueVarName varName
+    [] -> error "empty stack, should not be possible"
+
+
+makeUniqueVarName :: Identifier -> VarResolver Identifier
+makeUniqueVarName varName = do
+  (counter, stack) <- get
+  case stack of
+    (vars : stack') -> do
+      let uniqueVarName = "." ++ varName ++ "." ++ show counter
+      let vars' = Map.insert varName uniqueVarName vars
+      put (counter + 1, vars' : stack')
+      return uniqueVarName
+    [] -> error "empty stack, should not be possible"
 

@@ -104,15 +104,18 @@ genIrProgram' (Program func) = IrProgram <$> genIrFuncDef func
 
 
 genIrFuncDef :: FuncDef -> IrGen IrFuncDef
-genIrFuncDef (FuncDef name items) = do
+genIrFuncDef (FuncDef name block) = do
   -- main() returns 0 at the end if there is no return statement.
   -- The behavior for other functions is undefined if they don't
   -- explicitly return a value, so returning 0 is allowed.
   -- We'll let a future stage optimize this away if it isn't needed.
-  instructions <- concat <$> mapM genBlockItemIrInstructions items
-
+  instructions <- genBlockIrInstructions block
   let instructions' = instructions ++ [IrReturn (IrConstant 0)]
   return $ IrFuncDef name instructions'
+
+
+genBlockIrInstructions :: Block -> IrGen [IrInstruction]
+genBlockIrInstructions block = concat <$> mapM genBlockItemIrInstructions block
 
 
 genBlockItemIrInstructions :: BlockItem -> IrGen [IrInstruction]
@@ -146,8 +149,8 @@ genStmtIrInstructions (ExpressionStatement expr) = do
   (instructions, _) <- genExprIrInstructions expr
   return instructions
 
-genStmtIrInstructions (CompoundStatement stmts) =
-  concat <$> mapM genStmtIrInstructions stmts
+genStmtIrInstructions (CompoundStatement block) =
+  genBlockIrInstructions block
 
 genStmtIrInstructions (IfStatement expr stmt Nothing) = do
   (exprInstructions, exprValue) <- genExprIrInstructions expr
