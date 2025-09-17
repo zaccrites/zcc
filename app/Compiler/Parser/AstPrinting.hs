@@ -46,7 +46,7 @@ instance AstPrintNode BlockItem where
 
 instance AstPrintNode Declaration where
   getAstNodeDescription (VariableDeclaration name _) =
-    "VariableDeclaration : int " ++ name
+    "VariableDeclaration : int '" ++ name ++ "'"
   getAstSubnodeLines (VariableDeclaration _ initExpr) =
     maybe (return []) printAstNode initExpr
 
@@ -61,17 +61,62 @@ instance AstPrintNode Statement where
   getAstNodeDescription (IfStatement _ _ elseStmt) =
     "IfStatement" ++ (if isJust elseStmt then " (if/else)" else "")
 
+  getAstNodeDescription (ContinueStatement "") = "ContinueStatement"
+  getAstNodeDescription (ContinueStatement label) = "ContinueStatement : '" ++ label ++ "'"
+  getAstNodeDescription (BreakStatement "") = "BreakStatement"
+  getAstNodeDescription (BreakStatement label) = "BreakStatement : '" ++ label ++ "'"
+  getAstNodeDescription (WhileStatement _ _ "") = "WhileStatement"
+  getAstNodeDescription (WhileStatement _ _ label) = "WhileStatement : '" ++ label ++ "'"
+  getAstNodeDescription (DoWhileStatement _ _ "") = "DoWhileStatement"
+  getAstNodeDescription (DoWhileStatement _ _ label) = "DoWhileStatement : '" ++ label ++ "'"
+  getAstNodeDescription (ForStatement _ _ _ _ "") = "ForStatement"
+  getAstNodeDescription (ForStatement _ _ _ _ label) = "ForStatement : '" ++ label ++ "'"
+
+
   getAstSubnodeLines NullStatement = return []
   getAstSubnodeLines (GotoStatement _) = return []
+  getAstSubnodeLines (ContinueStatement _) = return []
+  getAstSubnodeLines (BreakStatement _) = return []
   getAstSubnodeLines (ReturnStatement expr) = printAstNode expr
   getAstSubnodeLines (ExpressionStatement expr) = printAstNode expr
   getAstSubnodeLines (CompoundStatement stmts) = do
     concat <$> mapM printAstNode stmts
+
   getAstSubnodeLines (IfStatement expr stmt elseStmt) = do
     exprLines <- printAstNode expr
     stmtLines <- printAstNode stmt
     elseStmtLines <- traverse printAstNode elseStmt
     return $ concat [exprLines, stmtLines, fromMaybe [] elseStmtLines]
+
+  getAstSubnodeLines (WhileStatement expr stmt _) = do
+    exprLines <- printAstNode expr
+    stmtLines <- printAstNode stmt
+    return $ exprLines ++ stmtLines
+  getAstSubnodeLines (DoWhileStatement expr stmt _) = do
+    exprLines <- printAstNode expr
+    stmtLines <- printAstNode stmt
+    return $ exprLines ++ stmtLines
+  getAstSubnodeLines (ForStatement forInit expr forPost stmt _) = do
+    initLines <- printAstNode forInit
+    exprLines <- traverse printAstNode expr
+    forPostLines <- traverse printAstNode forPost
+    stmtLines <- printAstNode stmt
+    return (
+      initLines ++
+      fromMaybe ["(empty condition expression)"] exprLines ++
+      fromMaybe ["(empty post expression)"] forPostLines ++
+      stmtLines
+      )
+
+
+instance AstPrintNode ForInit where
+  getAstNodeDescription (ForInitDeclaration decl) = getAstNodeDescription decl
+  getAstNodeDescription (ForInitExpression expr) = getAstNodeDescription expr
+  getAstNodeDescription ForInitEmpty = "(empty for init)"
+
+  getAstSubnodeLines (ForInitDeclaration decl) = getAstSubnodeLines decl
+  getAstSubnodeLines (ForInitExpression expr) = getAstSubnodeLines expr
+  getAstSubnodeLines ForInitEmpty = return []
 
 
 instance AstPrintNode Expression where

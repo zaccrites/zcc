@@ -19,6 +19,7 @@ import Control.Monad.State (StateT (..), get, put)
 import Control.Monad.Identity (Identity (..))
 
 import Compiler.Parser.Parser
+import Data.Maybe (fromMaybe)
 
 
 type Identifier = String
@@ -188,6 +189,109 @@ genStmtIrInstructions NullStatement = return []
 
 genStmtIrInstructions (GotoStatement name) =
   return [IrJump IrJumpAlways (makeFuncLocalLabelName name)]
+
+
+genStmtIrInstructions (WhileStatement expr stmt label) = do
+  (exprInstructions, exprValue) <- genExprIrInstructions expr
+  stmtInstructions <- genStmtIrInstructions stmt
+  let continueLabelName = getLoopContinueTargetLabel label
+  let breakLabelName = getLoopBreakTargetLabel label
+  return (
+    [ IrLabel continueLabelName ] ++
+    exprInstructions ++
+    [ IrJump (IrJumpIfZero exprValue) breakLabelName ] ++
+    stmtInstructions ++
+    [ IrJump IrJumpAlways continueLabelName
+    , IrLabel breakLabelName
+    ]
+    )
+
+genStmtIrInstructions (DoWhileStatement expr stmt label) = do
+  (exprInstructions, exprValue) <- genExprIrInstructions expr
+  stmtInstructions <- genStmtIrInstructions stmt
+  let startLabelName = getLoopStartTargetLabel label
+  let continueLabelName = getLoopContinueTargetLabel label
+  let breakLabelName = getLoopBreakTargetLabel label
+  return (
+    [ IrLabel startLabelName ] ++
+    stmtInstructions ++
+    [ IrLabel continueLabelName ] ++
+    exprInstructions ++
+    [ IrJump (IrJumpIfNotZero exprValue) startLabelName
+    , IrLabel breakLabelName
+    ]
+    )
+
+genStmtIrInstructions (ForStatement forInit (Just expr) forPost stmt label) = do
+  forInitInstructions <- genForInitInstructions forInit
+  (exprInstructions, exprValue) <- genExprIrInstructions expr
+  forPostInstructions <- traverse genExprStmtIrInstructions forPost
+  stmtInstructions <- genStmtIrInstructions stmt
+  let continueLabelName = getLoopContinueTargetLabel label
+  let breakLabelName = getLoopBreakTargetLabel label
+
+  return (
+    forInitInstructions ++
+    [ IrLabel continueLabelName ] ++
+    exprInstructions ++
+    [ IrJump (IrJumpIfZero exprValue) breakLabelName ] ++
+    stmtInstructions ++
+    fromMaybe [] forPostInstructions ++
+    [ IrJump IrJumpAlways continueLabelName
+    , IrLabel breakLabelName
+    ]
+    )
+
+
+genStmtIrInstructions (ForStatement forInit Nothing forPost stmt label) = do
+  forInitInstructions <- genForInitInstructions forInit
+  forPostInstructions <- traverse genExprStmtIrInstructions forPost
+  stmtInstructions <- genStmtIrInstructions stmt
+  let continueLabelName = getLoopContinueTargetLabel label
+  let breakLabelName = getLoopBreakTargetLabel label
+
+  return (
+    forInitInstructions ++
+    [ IrLabel continueLabelName ] ++
+    stmtInstructions ++
+    fromMaybe [] forPostInstructions ++
+    [ IrJump IrJumpAlways continueLabelName
+    , IrLabel breakLabelName
+    ]
+    )
+
+
+genStmtIrInstructions (ContinueStatement label) =
+  return [IrJump IrJumpAlways (getLoopContinueTargetLabel label)]
+
+genStmtIrInstructions (BreakStatement label) =
+  return [IrJump IrJumpAlways (getLoopBreakTargetLabel label)]
+
+
+genForInitInstructions :: ForInit -> IrGen [IrInstruction]
+genForInitInstructions ForInitEmpty = return []
+genForInitInstructions (ForInitExpression expr) = genExprStmtIrInstructions expr
+genForInitInstructions (ForInitDeclaration decl) = case decl of
+  VariableDeclaration name (Just initExpr) -> do
+    (instructions, value) <- genExprIrInstructions initExpr
+    return $ instructions ++ [IrCopy value (IrWriteVar name)]
+  _ -> return []
+
+
+-- Generate the instructions for an expression, ignoring the value.
+genExprStmtIrInstructions :: Expression -> IrGen [IrInstruction]
+genExprStmtIrInstructions expr = fst <$> genExprIrInstructions expr
+
+
+getLoopBreakTargetLabel :: Identifier -> Identifier
+getLoopBreakTargetLabel name = ".L_loop." ++ name ++ ".break"
+
+getLoopContinueTargetLabel :: Identifier -> Identifier
+getLoopContinueTargetLabel name = ".L_loop." ++ name ++ ".continue"
+
+-- Only really needed for do-while loops.
+getLoopStartTargetLabel :: Identifier -> Identifier
+getLoopStartTargetLabel name = ".L_loop." ++ name ++ ".start"
 
 
 genExprIrInstructions :: Expression -> IrGen ([IrInstruction], IrReadValue)

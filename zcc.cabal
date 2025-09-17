@@ -80,6 +80,7 @@ executable zcc
       Compiler.Parser.AstPrinting
       Compiler.Parser.Parser
       Compiler.Parser.ParserError
+      Compiler.SemanticAnalysis.LoopLabeling
       Compiler.SemanticAnalysis.VariableResolution
       Compiler.SourceLocation
 

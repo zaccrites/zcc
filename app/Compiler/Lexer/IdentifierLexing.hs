@@ -22,6 +22,11 @@ readIdentifierOrKeyword = do
     "if" -> Keyword KeywordIf
     "else" -> Keyword KeywordElse
     "goto" -> Keyword KeywordGoto
+    "for" -> Keyword KeywordFor
+    "while" -> Keyword KeywordWhile
+    "do" -> Keyword KeywordDo
+    "break" -> Keyword KeywordBreak
+    "continue" -> Keyword KeywordContinue
     xs -> Identifier xs
 
 

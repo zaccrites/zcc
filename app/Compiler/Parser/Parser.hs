@@ -13,6 +13,8 @@ module Compiler.Parser.Parser (
   Block,
   BlockItem (..),
   Declaration (..),
+  ForInit (..),
+  ForPost,
 )
 where
 
@@ -31,6 +33,7 @@ import Control.Monad (void)
 
 
 type Identifier = String
+type Label = Identifier
 
 data Program = Program FuncDef deriving (Show)
 data FuncDef = FuncDef Identifier Block deriving (Show)
@@ -43,6 +46,12 @@ data BlockItem
 
 type Block = [BlockItem]
 
+-- FUTURE: the Labels on Break and Continue statements only exist
+-- after a semantic analysis pass to determine which loop they will
+-- jump to or out of. The same is true of the labels on the loops themselves.
+-- This is a perfect application of the "trees that grow"
+-- annotation addition technique, adding that data at the appropriate time.
+
 data Statement
   = ReturnStatement Expression
   | ExpressionStatement Expression
@@ -50,7 +59,20 @@ data Statement
   | CompoundStatement Block
   | GotoStatement Identifier
   | NullStatement
+  | BreakStatement Label
+  | ContinueStatement Label
+  | WhileStatement Expression Statement Label
+  | DoWhileStatement Expression Statement Label
+  | ForStatement ForInit (Maybe Expression) ForPost Statement Label
   deriving (Show)
+
+data ForInit
+  = ForInitDeclaration Declaration
+  | ForInitExpression Expression
+  | ForInitEmpty
+  deriving (Show)
+
+type ForPost = Maybe Expression
 
 data Expression
   = ConstantExpression Integer
@@ -147,7 +169,6 @@ isBinaryOperatorLeftAssociative op = case op of
   _ -> True
 
 
-
 type ParserT m = WriterT [ParserError] (StateT [SourceToken] m)
 type Parser = ParserT Identity
 type MaybeParser = MaybeT Parser
@@ -233,13 +254,84 @@ parseStatement = do
     Tokens.Keyword KeywordIf -> parseIfStatement
     Tokens.Keyword KeywordReturn -> parseReturnStatement
     Tokens.Keyword KeywordGoto -> parseGotoStatement
+    Tokens.Keyword KeywordFor -> parseForStatement
+    Tokens.Keyword KeywordWhile -> parseWhileStatement
+    Tokens.Keyword KeywordDo -> parseDoWhileStatement
+    Tokens.Keyword KeywordContinue -> parseContinueStatement
+    Tokens.Keyword KeywordBreak -> parseBreakStatement
     _ -> do
       expr <- parseExpression
       expectToken Tokens.Semicolon
       return $ ExpressionStatement expr
 
 
+parseBreakStatement :: MaybeParser Statement
+parseBreakStatement = do
+  expectKeyword KeywordBreak
+  expectToken Tokens.Semicolon
+  return $ BreakStatement ""
 
+parseContinueStatement :: MaybeParser Statement
+parseContinueStatement = do
+  expectKeyword KeywordContinue
+  expectToken Tokens.Semicolon
+  return $ ContinueStatement ""
+
+parseWhileStatement :: MaybeParser Statement
+parseWhileStatement = do
+  expectKeyword KeywordWhile
+  expectToken Tokens.OpenParen
+  expr <- parseExpression
+  expectToken Tokens.CloseParen
+  stmt <- parseStatement
+  return $ WhileStatement expr stmt ""
+
+parseDoWhileStatement :: MaybeParser Statement
+parseDoWhileStatement = do
+  expectKeyword KeywordDo
+  stmt <- parseStatement
+  expectKeyword KeywordWhile
+  expectToken Tokens.OpenParen
+  expr <- parseExpression
+  expectToken Tokens.CloseParen
+  return $ DoWhileStatement expr stmt ""
+
+
+parseForStatement :: MaybeParser Statement
+parseForStatement = do
+  expectKeyword KeywordFor
+  expectToken Tokens.OpenParen
+  forInit <- parseForInit
+  -- parseDeclaration consumes a semicolon
+  expr <- parseForExpr
+  expectToken Tokens.Semicolon
+  forPost <- parseForPost
+  expectToken Tokens.CloseParen
+  stmt <- parseStatement
+  return $ ForStatement forInit expr forPost stmt ""
+
+  where
+    parseForInit :: MaybeParser ForInit
+    parseForInit = do
+      SourceToken token _ <- peekNextToken
+      case token of
+        Tokens.Semicolon -> return ForInitEmpty
+        Tokens.Keyword KeywordInt -> ForInitDeclaration <$> parseDeclaration
+        _ -> ForInitExpression <$> parseExpression
+
+    parseForExpr :: MaybeParser (Maybe Expression)
+    parseForExpr = do
+      SourceToken token _ <- peekNextToken
+      case token of
+        Tokens.Semicolon -> return Nothing
+        _ -> Just <$> parseExpression
+
+    parseForPost :: MaybeParser ForPost
+    parseForPost = do
+      SourceToken token _ <- peekNextToken
+      case token of
+        Tokens.CloseParen -> return Nothing
+        _ -> Just <$> parseExpression
 
 
 -- FUTURE: Build a "manyTill" combinator to use instead.

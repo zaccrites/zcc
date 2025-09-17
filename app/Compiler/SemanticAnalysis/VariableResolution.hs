@@ -1,6 +1,5 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
-
 module Compiler.SemanticAnalysis.VariableResolution (
   resolveVariables,
   VarResolverError,
@@ -27,16 +26,22 @@ type VarResolver = VarResolverT Identity
 type VarResolverT m = WriterT [VarResolverError] (StateT VarResolverState m)
 
 
-resolveVariables :: FuncDef -> (FuncDef, [VarResolverError])
-resolveVariables func = (func', errors)
+resolveVariables :: Program -> (Program, [VarResolverError])
+resolveVariables program = (program', errors)
   where
     initState = (0, [])
-    ((func', errors), _) = runIdentity $ runStateT (runWriterT $ resolveVariables' func) initState
+    ((program', errors), _) = runIdentity $ runStateT (runWriterT $ resolveVariables' program) initState
 
 
-resolveVariables' :: FuncDef -> VarResolver FuncDef
-resolveVariables' (FuncDef funcName block) =
-  FuncDef funcName <$> resolveBlockVars funcName block
+resolveVariables' :: Program -> VarResolver Program
+resolveVariables' (Program func) = do
+  func' <- resolveFuncVars func
+  return $ Program func'
+
+
+resolveFuncVars :: FuncDef -> VarResolver FuncDef
+resolveFuncVars (FuncDef name block) =
+  FuncDef name <$> resolveBlockVars name block
 
 -- TODO: use a reader monad for e.g. the function name
 
@@ -84,6 +89,35 @@ resolveStmtVars funcName (IfStatement expr stmt elseStmt) = do
   stmt' <- resolveStmtVars funcName stmt
   elseStmt' <- traverse (resolveStmtVars funcName) elseStmt
   return $ IfStatement expr' stmt' elseStmt'
+
+
+resolveStmtVars funcName (WhileStatement expr stmt label) = do
+  expr' <- resolveExprVars funcName expr
+  stmt' <- resolveStmtVars funcName stmt
+  return $ WhileStatement expr' stmt' label
+
+resolveStmtVars funcName (DoWhileStatement expr stmt label) = do
+  expr' <- resolveExprVars funcName expr
+  stmt' <- resolveStmtVars funcName stmt
+  return $ DoWhileStatement expr' stmt' label
+
+resolveStmtVars funcName (ForStatement forInit expr forPost stmt label) = do
+  pushScopeStack  -- since we can declare a variable in the forInit
+  forInit' <- resolveForInitVars funcName forInit
+  expr' <- traverse (resolveExprVars funcName) expr
+  forPost' <- traverse (resolveExprVars funcName) forPost
+  stmt' <- resolveStmtVars funcName stmt
+  popScopeStack
+  return $ ForStatement forInit' expr' forPost' stmt' label
+
+resolveStmtVars _ stmt@(ContinueStatement _) = return stmt
+resolveStmtVars _ stmt@(BreakStatement _) = return stmt
+
+
+resolveForInitVars :: Identifier -> ForInit -> VarResolver ForInit
+resolveForInitVars _ ForInitEmpty = return ForInitEmpty
+resolveForInitVars funcName (ForInitExpression expr) = ForInitExpression <$> resolveExprVars funcName expr
+resolveForInitVars funcName (ForInitDeclaration decl) = ForInitDeclaration <$> resolveDeclVars funcName decl
 
 
 resolveExprVars :: Identifier -> Expression -> VarResolver Expression

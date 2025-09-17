@@ -2,9 +2,10 @@
 
 module Main(main) where
 
+import Control.Monad.Except
 import System.Exit (ExitCode (..), exitWith)
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, when, foldM)
 import Compiler.Lexer.Tokenizer
 import Compiler.Lexer.SourceToken
 import Compiler.Lexer.Token
@@ -14,6 +15,7 @@ import Compiler.Parser.AstPrinting
 import Compiler.CodeGen.Intermediate
 import Compiler.CodeGen.AssemblyX64
 import Compiler.SemanticAnalysis.VariableResolution
+import Compiler.SemanticAnalysis.LoopLabeling
 
 -- enumerate :: Integral b => [a] -> [(b, a)]
 enumerate :: [a] -> [(Integer, a)]
@@ -27,7 +29,6 @@ main = run >>= exitWith
 run :: IO ExitCode
 run = do
   text <- readFile "/home/zac/code/zcc/sample.c"
-  putStr text
 
   putStrLn "---------------------- Code ----------------------"
   let textLines = lines text
@@ -75,19 +76,32 @@ doParseProgram tokens = do
 
 doSemanticAnalysis :: Program -> IO ExitCode
 doSemanticAnalysis program = do
-  let Program func = program
-  let (func', errors) = resolveVariables func
-  let program' = Program func'
+  result <- runSteps
+  case result of
+    Left exitCode -> return exitCode
+    Right program' -> doIrCodeGen program'
 
-  putStrLn "---------------------- Semantic Analysis ----------------------"
-  if null errors
-    then forM_ (printAst program') putStrLn
-    else forM_ (enumerate errors) \(i, err) -> putStrLn (show i ++ ": " ++ err)
-  putStrLn "\n"
+  where
+    steps =
+      [ doStep "Variable Resolution" resolveVariables
+      , doStep "Label Loops" labelLoops
+      ]
 
-  if null errors
-    then doIrCodeGen program'
-    else return $ ExitFailure 1
+    runSteps = runExceptT $ foldM runStep program steps
+      where
+        runStep val step = ExceptT (step val)
+
+    doStep :: Show e => String -> (Program -> (Program, [e])) -> Program -> IO (Either ExitCode Program)
+    doStep name step stepProgram = do
+      let (stepProgram', errors) = step stepProgram
+      putStrLn $ "---------------------- " ++ name ++ " ----------------------"
+      if null errors
+        then forM_ (printAst stepProgram') putStrLn
+        else forM_ (enumerate errors) \(i, err) -> putStrLn (show i ++ ": " ++ show err)
+      putStrLn "\n"
+      if null errors
+          then return $ Right stepProgram'
+          else return $ Left (ExitFailure 1)
 
 
 doIrCodeGen :: Program -> IO ExitCode

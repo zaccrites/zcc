@@ -7,21 +7,31 @@ where
 
 
 data Keyword
-  = KeywordInt
-  | KeywordVoid
-  | KeywordReturn
-  | KeywordIf
+  = KeywordBreak
+  | KeywordContinue
+  | KeywordDo
   | KeywordElse
+  | KeywordFor
   | KeywordGoto
+  | KeywordIf
+  | KeywordInt
+  | KeywordReturn
+  | KeywordVoid
+  | KeywordWhile
   deriving (Show, Eq)
 
 
 keywordToString :: Keyword -> String
 keywordToString keyword = case keyword of
-  KeywordInt -> "int"
-  KeywordVoid -> "void"
-  KeywordReturn -> "return"
-  KeywordIf -> "if"
+  KeywordBreak -> "break"
+  KeywordContinue -> "continue"
+  KeywordDo -> "do"
   KeywordElse -> "else"
+  KeywordFor -> "for"
   KeywordGoto -> "goto"
+  KeywordIf -> "if"
+  KeywordInt -> "int"
+  KeywordReturn -> "return"
+  KeywordVoid -> "void"
+  KeywordWhile -> "while"
 
