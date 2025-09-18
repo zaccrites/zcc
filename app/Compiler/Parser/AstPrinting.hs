@@ -61,16 +61,24 @@ instance AstPrintNode Statement where
   getAstNodeDescription (IfStatement _ _ elseStmt) =
     "IfStatement" ++ (if isJust elseStmt then " (if/else)" else "")
 
-  getAstNodeDescription (ContinueStatement "") = "ContinueStatement"
-  getAstNodeDescription (ContinueStatement label) = "ContinueStatement : '" ++ label ++ "'"
-  getAstNodeDescription (BreakStatement "") = "BreakStatement"
-  getAstNodeDescription (BreakStatement label) = "BreakStatement : '" ++ label ++ "'"
-  getAstNodeDescription (WhileStatement _ _ "") = "WhileStatement"
-  getAstNodeDescription (WhileStatement _ _ label) = "WhileStatement : '" ++ label ++ "'"
-  getAstNodeDescription (DoWhileStatement _ _ "") = "DoWhileStatement"
-  getAstNodeDescription (DoWhileStatement _ _ label) = "DoWhileStatement : '" ++ label ++ "'"
-  getAstNodeDescription (ForStatement _ _ _ _ "") = "ForStatement"
-  getAstNodeDescription (ForStatement _ _ _ _ label) = "ForStatement : '" ++ label ++ "'"
+  getAstNodeDescription (ContinueStatement (LoopLabel "")) = "ContinueStatement"
+  getAstNodeDescription (ContinueStatement (LoopLabel label)) = "ContinueStatement : '" ++ label ++ "'"
+  getAstNodeDescription (WhileStatement _ _ (LoopLabel "")) = "WhileStatement"
+  getAstNodeDescription (WhileStatement _ _ (LoopLabel label)) = "WhileStatement : '" ++ label ++ "'"
+  getAstNodeDescription (DoWhileStatement _ _ (LoopLabel "")) = "DoWhileStatement"
+  getAstNodeDescription (DoWhileStatement _ _ (LoopLabel label)) = "DoWhileStatement : '" ++ label ++ "'"
+  getAstNodeDescription (ForStatement _ _ _ _ (LoopLabel "")) = "ForStatement"
+  getAstNodeDescription (ForStatement _ _ _ _ (LoopLabel label)) = "ForStatement : '" ++ label ++ "'"
+  getAstNodeDescription (SwitchStatement _ _ (SwitchLabel "")) = "SwitchStatement"
+  getAstNodeDescription (SwitchStatement _ _ (SwitchLabel label)) = "SwitchStatement : '" ++ label ++ "'"
+  getAstNodeDescription (BreakStatement target) =
+    "BreakStatement" ++ suffix
+    where
+      suffix = case target of
+        BreakTargetLoop (LoopLabel "") -> ""
+        BreakTargetLoop (LoopLabel label) -> " : loop '" ++ label ++ "'"
+        BreakTargetSwitch (SwitchLabel "") -> ""
+        BreakTargetSwitch (SwitchLabel label) -> " : switch '" ++ label ++ "'"
 
 
   getAstSubnodeLines NullStatement = return []
@@ -107,6 +115,24 @@ instance AstPrintNode Statement where
       fromMaybe ["(empty post expression)"] forPostLines ++
       stmtLines
       )
+
+  getAstSubnodeLines (SwitchStatement expr items _) = do
+    exprLines <- printAstNode expr
+    itemLines <- concat <$> mapM printAstNode items
+    return $ exprLines ++ itemLines
+
+
+instance AstPrintNode SwitchItem where
+
+  getAstNodeDescription (SwitchItemCase value "") = "SwitchItemCase " ++ show value
+  getAstNodeDescription (SwitchItemCase value label) = "SwitchItemCase " ++ show value ++ " : '" ++ label ++ "'"
+  getAstNodeDescription (SwitchItemDefaultCase "") = "SwitchItemDefaultCase"
+  getAstNodeDescription (SwitchItemDefaultCase label) = "SwitchItemDefaultCase : '" ++ label ++ "'"
+  getAstNodeDescription (SwitchItemStatement _) = "SwitchItemStatement"
+
+  getAstSubnodeLines (SwitchItemCase _ _) = return []
+  getAstSubnodeLines (SwitchItemDefaultCase _) = return []
+  getAstSubnodeLines (SwitchItemStatement stmt) = printAstNode stmt
 
 
 instance AstPrintNode ForInit where

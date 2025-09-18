@@ -8,7 +8,9 @@ where
 
 data Keyword
   = KeywordBreak
+  | KeywordCase
   | KeywordContinue
+  | KeywordDefault
   | KeywordDo
   | KeywordElse
   | KeywordFor
@@ -16,6 +18,7 @@ data Keyword
   | KeywordIf
   | KeywordInt
   | KeywordReturn
+  | KeywordSwitch
   | KeywordVoid
   | KeywordWhile
   deriving (Show, Eq)
@@ -24,7 +27,9 @@ data Keyword
 keywordToString :: Keyword -> String
 keywordToString keyword = case keyword of
   KeywordBreak -> "break"
+  KeywordCase -> "case"
   KeywordContinue -> "continue"
+  KeywordDefault -> "default"
   KeywordDo -> "do"
   KeywordElse -> "else"
   KeywordFor -> "for"
@@ -32,6 +37,7 @@ keywordToString keyword = case keyword of
   KeywordIf -> "if"
   KeywordInt -> "int"
   KeywordReturn -> "return"
+  KeywordSwitch -> "switch"
   KeywordVoid -> "void"
   KeywordWhile -> "while"
 

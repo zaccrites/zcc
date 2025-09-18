@@ -20,6 +20,7 @@ import Control.Monad.Identity (Identity (..))
 
 import Compiler.Parser.Parser
 import Data.Maybe (fromMaybe)
+import Data.Foldable (foldrM)
 
 
 type Identifier = String
@@ -195,7 +196,7 @@ genStmtIrInstructions (WhileStatement expr stmt label) = do
   (exprInstructions, exprValue) <- genExprIrInstructions expr
   stmtInstructions <- genStmtIrInstructions stmt
   let continueLabelName = getLoopContinueTargetLabel label
-  let breakLabelName = getLoopBreakTargetLabel label
+  let breakLabelName = getBreakTargetLabel (BreakTargetLoop label)
   return (
     [ IrLabel continueLabelName ] ++
     exprInstructions ++
@@ -211,7 +212,7 @@ genStmtIrInstructions (DoWhileStatement expr stmt label) = do
   stmtInstructions <- genStmtIrInstructions stmt
   let startLabelName = getLoopStartTargetLabel label
   let continueLabelName = getLoopContinueTargetLabel label
-  let breakLabelName = getLoopBreakTargetLabel label
+  let breakLabelName = getBreakTargetLabel (BreakTargetLoop label)
   return (
     [ IrLabel startLabelName ] ++
     stmtInstructions ++
@@ -228,7 +229,7 @@ genStmtIrInstructions (ForStatement forInit (Just expr) forPost stmt label) = do
   forPostInstructions <- traverse genExprStmtIrInstructions forPost
   stmtInstructions <- genStmtIrInstructions stmt
   let continueLabelName = getLoopContinueTargetLabel label
-  let breakLabelName = getLoopBreakTargetLabel label
+  let breakLabelName = getBreakTargetLabel (BreakTargetLoop label)
 
   return (
     forInitInstructions ++
@@ -248,7 +249,7 @@ genStmtIrInstructions (ForStatement forInit Nothing forPost stmt label) = do
   forPostInstructions <- traverse genExprStmtIrInstructions forPost
   stmtInstructions <- genStmtIrInstructions stmt
   let continueLabelName = getLoopContinueTargetLabel label
-  let breakLabelName = getLoopBreakTargetLabel label
+  let breakLabelName = getBreakTargetLabel (BreakTargetLoop label)
 
   return (
     forInitInstructions ++
@@ -265,7 +266,45 @@ genStmtIrInstructions (ContinueStatement label) =
   return [IrJump IrJumpAlways (getLoopContinueTargetLabel label)]
 
 genStmtIrInstructions (BreakStatement label) =
-  return [IrJump IrJumpAlways (getLoopBreakTargetLabel label)]
+  return [IrJump IrJumpAlways (getBreakTargetLabel label)]
+
+
+genStmtIrInstructions (SwitchStatement expr items label) = do
+  (exprInstructions, exprValue) <- genExprIrInstructions expr
+  scratchpad <- IrWriteVar <$> getNewTempVarName
+  let switchBreakLabel = getBreakTargetLabel (BreakTargetSwitch label)
+  stmtInstructions <- switchStatementInstructions
+  return (
+    exprInstructions ++
+    caseJumpInstructions scratchpad exprValue ++
+    [IrJump IrJumpAlways switchBreakLabel] ++  -- needed if there is no 'default' case
+    stmtInstructions ++
+    [IrLabel switchBreakLabel]
+    )
+
+  where
+    caseJumpInstructions :: IrWriteValue -> IrReadValue -> [IrInstruction]
+    caseJumpInstructions scratchpad exprValue = concat $ foldr f [] items
+      where
+        f :: SwitchItem -> [[IrInstruction]] -> [[IrInstruction]]
+        f (SwitchItemCase value caseLabel) acc =
+          [ IrBinary IrEqual (IrConstant value) exprValue scratchpad
+          , IrJump (IrJumpIfNotZero (readIrValue scratchpad)) (makeFuncLocalLabelName caseLabel)
+          ] : acc
+        f (SwitchItemDefaultCase caseLabel) acc =
+          [ IrJump IrJumpAlways (makeFuncLocalLabelName caseLabel) ] : acc
+        f (SwitchItemStatement _) acc = acc
+
+    switchStatementInstructions :: IrGen [IrInstruction]
+    switchStatementInstructions = concat <$> foldrM f [] items
+      where
+        f :: SwitchItem -> [[IrInstruction]] -> IrGen [[IrInstruction]]
+        f (SwitchItemCase _ caseLabel) acc =
+          return $ [IrLabel (makeFuncLocalLabelName caseLabel)] : acc
+        f (SwitchItemDefaultCase caseLabel) acc
+          = return $ [IrLabel (makeFuncLocalLabelName caseLabel)] : acc
+        f (SwitchItemStatement stmt) acc
+          = (: acc) <$> genStmtIrInstructions stmt
 
 
 genForInitInstructions :: ForInit -> IrGen [IrInstruction]
@@ -283,15 +322,20 @@ genExprStmtIrInstructions :: Expression -> IrGen [IrInstruction]
 genExprStmtIrInstructions expr = fst <$> genExprIrInstructions expr
 
 
-getLoopBreakTargetLabel :: Identifier -> Identifier
-getLoopBreakTargetLabel name = ".L_loop." ++ name ++ ".break"
+getBreakTargetLabel :: BreakTarget -> Identifier
+getBreakTargetLabel target =
+  ".L_" ++ targetTypeName ++ "." ++ name ++ ".break"
+  where
+    (targetTypeName, name) = case target of
+      (BreakTargetLoop (LoopLabel name')) -> ("loop", name')
+      (BreakTargetSwitch (SwitchLabel name')) -> ("switch", name')
 
-getLoopContinueTargetLabel :: Identifier -> Identifier
-getLoopContinueTargetLabel name = ".L_loop." ++ name ++ ".continue"
+getLoopContinueTargetLabel :: ContinueTarget -> Identifier
+getLoopContinueTargetLabel (LoopLabel name) = ".L_loop." ++ name ++ ".continue"
 
 -- Only really needed for do-while loops.
-getLoopStartTargetLabel :: Identifier -> Identifier
-getLoopStartTargetLabel name = ".L_loop." ++ name ++ ".start"
+getLoopStartTargetLabel :: LoopLabel -> Identifier
+getLoopStartTargetLabel (LoopLabel name) = ".L_loop." ++ name ++ ".start"
 
 
 genExprIrInstructions :: Expression -> IrGen ([IrInstruction], IrReadValue)

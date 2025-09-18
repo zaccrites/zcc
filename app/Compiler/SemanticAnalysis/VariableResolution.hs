@@ -113,6 +113,18 @@ resolveStmtVars funcName (ForStatement forInit expr forPost stmt label) = do
 resolveStmtVars _ stmt@(ContinueStatement _) = return stmt
 resolveStmtVars _ stmt@(BreakStatement _) = return stmt
 
+resolveStmtVars funcName (SwitchStatement expr items label) = do
+  expr' <- resolveExprVars funcName expr
+  items' <- mapM (resolveSwitchItemVars funcName) items
+  return $ SwitchStatement expr' items' label
+
+
+resolveSwitchItemVars :: Identifier -> SwitchItem -> VarResolver SwitchItem
+resolveSwitchItemVars _ item@(SwitchItemCase _ _) = return item
+resolveSwitchItemVars _ item@(SwitchItemDefaultCase _) = return item
+resolveSwitchItemVars funcName (SwitchItemStatement stmt) =
+  SwitchItemStatement <$> resolveStmtVars funcName stmt
+
 
 resolveForInitVars :: Identifier -> ForInit -> VarResolver ForInit
 resolveForInitVars _ ForInitEmpty = return ForInitEmpty

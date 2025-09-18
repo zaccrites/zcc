@@ -15,6 +15,13 @@ module Compiler.Parser.Parser (
   Declaration (..),
   ForInit (..),
   ForPost,
+  SwitchItem (..),
+  SwitchCaseValue,
+  SwitchCaseLabel,
+  LoopLabel (..),
+  SwitchLabel (..),
+  ContinueTarget,
+  BreakTarget (..),
 )
 where
 
@@ -33,7 +40,10 @@ import Control.Monad (void)
 
 
 type Identifier = String
-type Label = Identifier
+
+newtype LoopLabel = LoopLabel Identifier deriving (Show)
+newtype SwitchLabel = SwitchLabel Identifier deriving (Show)
+
 
 data Program = Program FuncDef deriving (Show)
 data FuncDef = FuncDef Identifier Block deriving (Show)
@@ -59,11 +69,28 @@ data Statement
   | CompoundStatement Block
   | GotoStatement Identifier
   | NullStatement
-  | BreakStatement Label
-  | ContinueStatement Label
-  | WhileStatement Expression Statement Label
-  | DoWhileStatement Expression Statement Label
-  | ForStatement ForInit (Maybe Expression) ForPost Statement Label
+  | BreakStatement BreakTarget
+  | ContinueStatement ContinueTarget
+  | WhileStatement Expression Statement LoopLabel
+  | DoWhileStatement Expression Statement LoopLabel
+  | ForStatement ForInit (Maybe Expression) ForPost Statement LoopLabel
+  | SwitchStatement Expression [SwitchItem] SwitchLabel
+  deriving (Show)
+
+type ContinueTarget = LoopLabel
+
+data BreakTarget
+  = BreakTargetLoop LoopLabel
+  | BreakTargetSwitch SwitchLabel
+  deriving (Show)
+
+type SwitchCaseValue = Integer
+type SwitchCaseLabel = Identifier
+
+data SwitchItem
+  = SwitchItemCase SwitchCaseValue SwitchCaseLabel
+  | SwitchItemDefaultCase SwitchCaseLabel
+  | SwitchItemStatement Statement
   deriving (Show)
 
 data ForInit
@@ -259,23 +286,67 @@ parseStatement = do
     Tokens.Keyword KeywordDo -> parseDoWhileStatement
     Tokens.Keyword KeywordContinue -> parseContinueStatement
     Tokens.Keyword KeywordBreak -> parseBreakStatement
+    Tokens.Keyword KeywordSwitch -> parseSwitchStatement
     _ -> do
       expr <- parseExpression
       expectToken Tokens.Semicolon
       return $ ExpressionStatement expr
 
+parseSwitchStatement :: MaybeParser Statement
+parseSwitchStatement = do
+  expectKeyword KeywordSwitch
+  expectToken Tokens.OpenParen
+  expr <- parseExpression
+  expectToken Tokens.CloseParen
+  expectToken Tokens.OpenBrace
+  items <- parseSwitchItems
+  expectToken Tokens.CloseBrace
+  return $ SwitchStatement expr items (SwitchLabel "")
+
+
+parseSwitchItems :: MaybeParser [SwitchItem]
+parseSwitchItems = go []
+  where
+    go :: [SwitchItem] -> MaybeParser [SwitchItem]
+    go items = do
+      SourceToken token _ <- peekNextToken
+      case token of
+        Tokens.CloseBrace -> return items
+        Tokens.Keyword KeywordCase -> do
+          item <- parseSwitchCase
+          go (items ++ [item])
+        Tokens.Keyword KeywordDefault -> do
+          item <- parseSwitchDefaultCase
+          go (items ++ [item])
+        _ -> do
+          stmt <- parseStatement
+          go (items ++ [SwitchItemStatement stmt])
+
+
+parseSwitchCase :: MaybeParser SwitchItem
+parseSwitchCase = do
+  expectKeyword KeywordCase
+  value <- expectConstant
+  expectToken Tokens.Colon
+  return $ SwitchItemCase value ""
+
+parseSwitchDefaultCase :: MaybeParser SwitchItem
+parseSwitchDefaultCase = do
+  expectKeyword KeywordDefault
+  expectToken Tokens.Colon
+  return $ SwitchItemDefaultCase ""
 
 parseBreakStatement :: MaybeParser Statement
 parseBreakStatement = do
   expectKeyword KeywordBreak
   expectToken Tokens.Semicolon
-  return $ BreakStatement ""
+  return $ BreakStatement (BreakTargetLoop (LoopLabel ""))
 
 parseContinueStatement :: MaybeParser Statement
 parseContinueStatement = do
   expectKeyword KeywordContinue
   expectToken Tokens.Semicolon
-  return $ ContinueStatement ""
+  return $ ContinueStatement (LoopLabel "")
 
 parseWhileStatement :: MaybeParser Statement
 parseWhileStatement = do
@@ -284,7 +355,7 @@ parseWhileStatement = do
   expr <- parseExpression
   expectToken Tokens.CloseParen
   stmt <- parseStatement
-  return $ WhileStatement expr stmt ""
+  return $ WhileStatement expr stmt (LoopLabel "")
 
 parseDoWhileStatement :: MaybeParser Statement
 parseDoWhileStatement = do
@@ -294,7 +365,7 @@ parseDoWhileStatement = do
   expectToken Tokens.OpenParen
   expr <- parseExpression
   expectToken Tokens.CloseParen
-  return $ DoWhileStatement expr stmt ""
+  return $ DoWhileStatement expr stmt (LoopLabel "")
 
 
 parseForStatement :: MaybeParser Statement
@@ -308,7 +379,7 @@ parseForStatement = do
   forPost <- parseForPost
   expectToken Tokens.CloseParen
   stmt <- parseStatement
-  return $ ForStatement forInit expr forPost stmt ""
+  return $ ForStatement forInit expr forPost stmt (LoopLabel "")
 
   where
     parseForInit :: MaybeParser ForInit
@@ -520,6 +591,17 @@ expectToken expected = do
       let message = "expected token \"" ++ show expected ++ "\""
       tell [ParserError {token=source, message=message}]
       MaybeT . return $ Nothing
+
+
+expectConstant :: MaybeParser Integer
+expectConstant = do
+  source@(SourceToken token _) <- getNextToken
+  MaybeT case token of
+    Tokens.Constant value -> return $ Just value
+    _ -> do
+      let message = "expected a constant token"
+      tell [ParserError {token=source, message=message}]
+      return Nothing
 
 
 getNextToken :: MaybeParser SourceToken

@@ -15,7 +15,8 @@ import Compiler.Parser.AstPrinting
 import Compiler.CodeGen.Intermediate
 import Compiler.CodeGen.AssemblyX64
 import Compiler.SemanticAnalysis.VariableResolution
-import Compiler.SemanticAnalysis.LoopLabeling
+import Compiler.SemanticAnalysis.LoopAndSwitchLabeling
+
 
 -- enumerate :: Integral b => [a] -> [(b, a)]
 enumerate :: [a] -> [(Integer, a)]
@@ -84,7 +85,7 @@ doSemanticAnalysis program = do
   where
     steps =
       [ doStep "Variable Resolution" resolveVariables
-      , doStep "Label Loops" labelLoops
+      , doStep "Label Loops and Switch Statements" labelLoopsAndSwitches
       ]
 
     runSteps = runExceptT $ foldM runStep program steps

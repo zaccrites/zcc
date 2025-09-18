@@ -16,17 +16,20 @@ readIdentifierOrKeyword :: Lexer Token
 readIdentifierOrKeyword = do
   chars <- takeCharsWhile isIdentifierChar
   return $ case chars of
-    "int" -> Keyword KeywordInt
-    "void" -> Keyword KeywordVoid
-    "return" -> Keyword KeywordReturn
-    "if" -> Keyword KeywordIf
-    "else" -> Keyword KeywordElse
-    "goto" -> Keyword KeywordGoto
-    "for" -> Keyword KeywordFor
-    "while" -> Keyword KeywordWhile
-    "do" -> Keyword KeywordDo
     "break" -> Keyword KeywordBreak
+    "case" -> Keyword KeywordCase
     "continue" -> Keyword KeywordContinue
+    "default" -> Keyword KeywordDefault
+    "do" -> Keyword KeywordDo
+    "else" -> Keyword KeywordElse
+    "for" -> Keyword KeywordFor
+    "goto" -> Keyword KeywordGoto
+    "if" -> Keyword KeywordIf
+    "int" -> Keyword KeywordInt
+    "return" -> Keyword KeywordReturn
+    "switch" -> Keyword KeywordSwitch
+    "void" -> Keyword KeywordVoid
+    "while" -> Keyword KeywordWhile
     xs -> Identifier xs
 
 
