@@ -2,7 +2,7 @@
 
 set -e
 cabal run
-gcc out.s -o out
+gcc -g out.s -o out
 gcc -O0 sample.c -o sample
 
 # We expect this to "fail", at least as long as its only way to

@@ -10,6 +10,7 @@ import Compiler.Lexer.Keyword
 
 data Token
   = Identifier String
+  | Comma
   | Constant Integer
   | Keyword Keyword
   | OpenParen
@@ -60,6 +61,7 @@ tokenToString :: Token -> String
 tokenToString token  = case token of
   Identifier name -> name
   Constant value -> show value
+  Comma -> ","
   Keyword keyword -> keywordToString keyword
   OpenParen -> "("
   CloseParen -> ")"

@@ -40,11 +40,14 @@ labelLoopsAndSwitches program = (program', errors)
 
 
 labelLoopsAndSwitches' :: Program -> Labeler Program
-labelLoopsAndSwitches' (Program func) = Program <$> labelFuncLoops func
+labelLoopsAndSwitches' (Program decls) = Program <$> traverse labelDeclLoops decls
 
 
-labelFuncLoops :: FuncDef -> Labeler FuncDef
-labelFuncLoops (FuncDef name block) = FuncDef name <$> labelBlockLoops block
+labelDeclLoops :: Declaration -> Labeler Declaration
+labelDeclLoops decl@(VariableDeclaration {}) = return decl
+labelDeclLoops decl@(FunctionDeclaration _ _ _ Nothing) = return decl
+labelDeclLoops (FunctionDeclaration linkage name params (Just block)) =
+  FunctionDeclaration linkage name params . Just <$> labelBlockLoops block
 
 
 labelBlockLoops :: Block -> Labeler Block

@@ -66,7 +66,11 @@ executable zcc
 
     -- Modules included in this executable, other than Main.
     other-modules:
-      Compiler.CodeGen.AssemblyX64
+      Compiler.CodeGen.AssemblyX64.Base
+      Compiler.CodeGen.AssemblyX64.FixFunctionStackSizes
+      Compiler.CodeGen.AssemblyX64.ReplacePseudoRegisters
+      Compiler.CodeGen.AssemblyX64.Utils
+      Compiler.CodeGen.AssemblyX64.Types
       Compiler.CodeGen.Intermediate
       Compiler.Lexer.IdentifierLexing
       Compiler.Lexer.IntLexing
@@ -81,7 +85,8 @@ executable zcc
       Compiler.Parser.Parser
       Compiler.Parser.ParserError
       Compiler.SemanticAnalysis.LoopAndSwitchLabeling
-      Compiler.SemanticAnalysis.VariableResolution
+      Compiler.SemanticAnalysis.IdentifierResolution
+      Compiler.SemanticAnalysis.TypeChecking
       Compiler.SourceLocation
 
     -- LANGUAGE extensions used by modules in this package.

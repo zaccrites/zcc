@@ -3,7 +3,7 @@
 
 module Compiler.CodeGen.Intermediate (
   IrProgram (..),
-  IrFuncDef (..),
+  IrDefinition (..),
   IrInstruction (..),
   IrReadValue (..),
   IrWriteValue (..),
@@ -19,14 +19,18 @@ import Control.Monad.State (StateT (..), get, put)
 import Control.Monad.Identity (Identity (..))
 
 import Compiler.Parser.Parser
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, catMaybes)
 import Data.Foldable (foldrM)
 
 
 type Identifier = String
 
-data IrProgram = IrProgram IrFuncDef deriving (Show)
-data IrFuncDef = IrFuncDef Identifier [IrInstruction] deriving (Show)
+data IrDefinition
+  = IrFunctionDefinition Identifier [FunctionParameter] [IrInstruction]
+  deriving (Show)
+
+data IrProgram = IrProgram [IrDefinition] deriving (Show)
+
 
 data IrInstruction
   = IrReturn IrReadValue
@@ -35,6 +39,7 @@ data IrInstruction
   | IrCopy IrReadValue IrWriteValue
   | IrJump IrJumpCondition Identifier
   | IrLabel Identifier
+  | IrFunctionCall Identifier [IrReadValue] IrWriteValue
   deriving (Show)
 
 data IrJumpCondition
@@ -102,18 +107,26 @@ genIrProgram program = result
     (result, _) = runIdentity $ runStateT (genIrProgram' program) (0, 0)
 
 genIrProgram' :: Program -> IrGen IrProgram
-genIrProgram' (Program func) = IrProgram <$> genIrFuncDef func
+genIrProgram' (Program decls) = IrProgram . catMaybes <$> mapM genIrDecl decls
 
 
-genIrFuncDef :: FuncDef -> IrGen IrFuncDef
-genIrFuncDef (FuncDef name block) = do
-  -- main() returns 0 at the end if there is no return statement.
-  -- The behavior for other functions is undefined if they don't
-  -- explicitly return a value, so returning 0 is allowed.
-  -- We'll let a future stage optimize this away if it isn't needed.
-  instructions <- genBlockIrInstructions block
-  let instructions' = instructions ++ [IrReturn (IrConstant 0)]
-  return $ IrFuncDef name instructions'
+-- genIrFunctionDefinition :: FunctionDefinition -> IrGen IrFunctionDefinition
+-- genIrFunctionDefinition (FunctionDefinition name args block) = do
+--   -- main() returns 0 at the end if there is no return statement.
+--   -- The behavior for other functions is undefined if they don't
+--   -- explicitly return a value, so returning 0 is allowed.
+--   -- We'll let a future stage optimize this away if it isn't needed.
+--   instructions <- genBlockIrInstructions block
+--   let instructions' = instructions ++ [IrReturn (IrConstant 0)]
+--   return $ IrFunctionDefinition name instructions'
+
+
+genIrDecl :: Declaration -> IrGen (Maybe IrDefinition)
+genIrDecl decl@(VariableDeclaration {}) = undefined  -- TODO
+genIrDecl decl@(FunctionDeclaration linkage name params Nothing) = return Nothing
+genIrDecl decl@(FunctionDeclaration linkage name params (Just _)) = do
+  -- declInstructions <- genDeclIrInstructions decl
+  Just . IrFunctionDefinition name params <$> genDeclIrInstructions decl
 
 
 genBlockIrInstructions :: Block -> IrGen [IrInstruction]
@@ -134,7 +147,21 @@ genLabelIrInstructions labelName = do
 
 
 genDeclIrInstructions :: Declaration -> IrGen [IrInstruction]
-genDeclIrInstructions (VariableDeclaration name initExpr) =
+genDeclIrInstructions (FunctionDeclaration _ _ _ Nothing) = return []
+
+genDeclIrInstructions (FunctionDeclaration _ name _ (Just block)) =
+  addInstructions <$> genBlockIrInstructions block
+  where
+    -- main() returns 0 at the end if there is no return statement.
+    -- The behavior for other functions is undefined if they don't
+    -- explicitly return a value, so returning 0 is allowed.
+    -- We'll let a future stage optimize this away if it isn't needed.
+    addInstructions :: [IrInstruction] -> [IrInstruction]
+    addInstructions xs = case name of
+      "main" -> xs ++ [IrReturn (IrConstant 0)]
+      _ -> xs
+
+genDeclIrInstructions (VariableDeclaration linkage name initExpr) =
   case initExpr of
     Just expr -> do
       (instructions, value) <- genExprIrInstructions expr
@@ -311,7 +338,7 @@ genForInitInstructions :: ForInit -> IrGen [IrInstruction]
 genForInitInstructions ForInitEmpty = return []
 genForInitInstructions (ForInitExpression expr) = genExprStmtIrInstructions expr
 genForInitInstructions (ForInitDeclaration decl) = case decl of
-  VariableDeclaration name (Just initExpr) -> do
+  VariableDeclaration linkage name (Just initExpr) -> do
     (instructions, value) <- genExprIrInstructions initExpr
     return $ instructions ++ [IrCopy value (IrWriteVar name)]
   _ -> return []
@@ -513,6 +540,16 @@ genExprIrInstructions (ConditionalExpression cond ifTrue ifFalse) = do
         , IrLabel endLabelName
         ]
   return (instructions, IrReadVar outputName)
+
+
+genExprIrInstructions (FunctionCallExpression name args) = do
+  args' <- traverse genExprIrInstructions args
+  let argsInstructions = concatMap fst args'
+  let argsReadValues = map snd args'
+  resultValue <- IrWriteVar <$> getNewTempVarName
+  let instructions = argsInstructions ++ [IrFunctionCall name argsReadValues resultValue]
+  return (instructions, readIrValue resultValue)
+
 
 
 data AssignmentType

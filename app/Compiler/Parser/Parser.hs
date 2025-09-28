@@ -5,7 +5,7 @@
 module Compiler.Parser.Parser (
   parseProgram,
   Program (..),
-  FuncDef (..),
+  FunctionParameter (..),
   Statement (..),
   Expression (..),
   UnaryOperator (..),
@@ -22,6 +22,7 @@ module Compiler.Parser.Parser (
   SwitchLabel (..),
   ContinueTarget,
   BreakTarget (..),
+  Linkage (..),
 )
 where
 
@@ -37,6 +38,7 @@ import Compiler.Parser.ParserError (ParserError (..))
 import Compiler.Lexer.Keyword
 
 import Control.Monad (void)
+import Compiler.Lexer.Token (tokenToString)
 
 
 type Identifier = String
@@ -45,8 +47,17 @@ newtype LoopLabel = LoopLabel Identifier deriving (Show)
 newtype SwitchLabel = SwitchLabel Identifier deriving (Show)
 
 
-data Program = Program FuncDef deriving (Show)
-data FuncDef = FuncDef Identifier Block deriving (Show)
+data Linkage
+  = ExternalLinkage
+  | InternalLinkage
+  | NoLinkage
+  deriving (Show)
+
+
+data Program
+  = Program [Declaration]
+  deriving (Show)
+
 
 data BlockItem
   = BlockItemStatement Statement
@@ -107,10 +118,16 @@ data Expression
   | UnaryExpression UnaryOperator Expression
   | BinaryExpression BinaryOperator Expression Expression
   | ConditionalExpression Expression Expression Expression
+  | FunctionCallExpression Identifier [Expression]
   deriving (Show)
 
+
+-- data Type = Type Identifier deriving (Show)
+data FunctionParameter = FunctionParameter Identifier deriving (Show)
+
 data Declaration
-  = VariableDeclaration Identifier (Maybe Expression)
+  = VariableDeclaration Linkage Identifier (Maybe Expression)
+  | FunctionDeclaration Linkage Identifier [FunctionParameter] (Maybe Block)
   deriving (Show)
 
 data UnaryOperator
@@ -200,6 +217,9 @@ type ParserT m = WriterT [ParserError] (StateT [SourceToken] m)
 type Parser = ParserT Identity
 type MaybeParser = MaybeT Parser
 
+-- TODO: Use ExceptT instead of MaybeT
+-- https://claude.ai/chat/15609ac9-8faf-4e9d-aa4e-fa02ebaa47c4
+
 
 parseProgram :: [SourceToken] -> (Maybe Program, [ParserError], [SourceToken])
 parseProgram tokens = (program, errors, tokens')
@@ -208,31 +228,76 @@ parseProgram tokens = (program, errors, tokens')
 
 
 parseProgram' :: MaybeParser Program
-parseProgram' = do
-  func <- parseFuncDef
-  expectToken Tokens.EndOfFile
-  return $ Program func
-
-
-parseFuncDef :: MaybeParser FuncDef
-parseFuncDef = do
-  expectKeyword KeywordInt
-  name <- getIdentifier
-  expectToken Tokens.OpenParen
-  expectToken Tokens.CloseParen
-  expectToken Tokens.OpenBrace
-  blockItems <- parseBlockItems []
-  return $ FuncDef name blockItems
-
+parseProgram' = Program <$> go []
   where
-    parseBlockItems :: [BlockItem] -> MaybeParser [BlockItem]
-    parseBlockItems xs = do
-      SourceToken nextToken _ <- peekNextToken
-      case nextToken of
-        Tokens.CloseBrace -> tossNextToken >> return xs
+    go :: [Declaration] -> MaybeParser [Declaration]
+    go xs = do
+      SourceToken token _ <- peekNextToken
+      case token of
+        Tokens.EndOfFile -> tossNextToken >> return xs
         _ -> do
-          x <- parseBlockItem
-          parseBlockItems (xs ++ [x])
+          func <- parseDeclaration
+          go (xs ++ [func])
+
+
+-- parseFuncDef :: MaybeParser FunctionDefinition
+-- parseFuncDef = do
+--   expectKeyword KeywordInt
+--   name <- getIdentifier
+--   params <- parseFunctionParams
+--   let info = FunctionInfo name params
+--   FunctionDefinition info <$> parseBlock
+
+
+parseFunctionParams :: MaybeParser [FunctionParameter]
+parseFunctionParams = do
+  expectToken Tokens.OpenParen
+  result <- go []
+  expectToken Tokens.CloseParen
+  return result
+  where
+    go xs = do
+      SourceToken token _ <- peekNextToken
+      case token of
+        Tokens.CloseParen -> return xs
+        _ -> do
+          param <- parseParam
+          go (xs ++ [param])
+
+    parseParam :: MaybeParser FunctionParameter
+    parseParam = do
+      expectKeyword KeywordInt
+      name <- getIdentifier
+      expectCommaOrCloseParen
+      return $ FunctionParameter name
+
+
+expectCommaOrCloseParen :: MaybeParser ()
+expectCommaOrCloseParen = do
+  source@(SourceToken token _) <- peekNextToken
+  case token of
+    Tokens.Comma -> tossNextToken
+    Tokens.CloseParen -> return ()
+    _ -> do
+      let message = "expected comma or close paren"
+      tell [ParserError {token=source, message=message}]
+
+
+parseBlock :: MaybeParser Block
+parseBlock = do
+  expectToken Tokens.OpenBrace
+  items <- go []
+  expectToken Tokens.CloseBrace
+  return items
+  where
+    go :: [BlockItem] -> MaybeParser [BlockItem]
+    go xs = do
+      SourceToken token _ <- peekNextToken
+      case token of
+        Tokens.CloseBrace -> return xs
+        _ -> do
+          item <- parseBlockItem
+          go (xs ++ [item])
 
 
 parseBlockItem :: MaybeParser BlockItem
@@ -255,26 +320,54 @@ parseBlockItem = do
 
 parseDeclaration :: MaybeParser Declaration
 parseDeclaration = do
-  expectKeyword KeywordInt
+  expectType
   name <- getIdentifier
 
-  source@(SourceToken nextToken _) <- getNextToken
-  case nextToken of
-    Tokens.Assign -> do
-      initExpr <- parseExpression
-      expectToken Tokens.Semicolon
-      return $ VariableDeclaration name (Just initExpr)
-    Tokens.Semicolon -> return $ VariableDeclaration name Nothing
+  source@(SourceToken token _) <- peekNextToken
+  case token of
+    Tokens.Semicolon -> tossNextToken >> parseUninitializedVarDecl name
+    Tokens.Assign -> tossNextToken >> parseInitializedVarDecl name
+    Tokens.OpenParen -> parseFuncDecl name
     x -> do
-      let message = "unexpected token \"" ++ show x ++ "\", expected '=' or ';' (parseDeclaration)"
+      let message = "unexpected token \"" ++ show x ++ "\", expected '=' or ';' or '(' (parseDeclaration)"
       tell [ParserError {message=message, token=source}]
       MaybeT . return $ Nothing
 
+  where
+    parseUninitializedVarDecl name = return $ VariableDeclaration NoLinkage name Nothing
+
+    parseInitializedVarDecl name = do
+      initExpr <- parseExpression
+      expectToken Tokens.Semicolon
+      return $ VariableDeclaration NoLinkage name (Just initExpr)
+
+    parseFuncDecl name = do
+      params <- parseFunctionParams
+      source@(SourceToken token _) <- peekNextToken
+      block <- case token of
+        Tokens.Semicolon -> tossNextToken >> return Nothing
+        Tokens.OpenBrace -> Just <$> parseBlock
+        _ -> do
+          let message = "unexpected token '" ++ tokenToString token ++ "' parsing function declaration (parseDeclaration)"
+          tell [ParserError {message=message, token=source}]
+          return Nothing
+      return $ FunctionDeclaration ExternalLinkage name params block
+
+
+
+-- FUTURE: return the type
+expectType :: MaybeParser ()
+expectType = do
+  SourceToken token _ <- getNextToken
+  MaybeT $ case token of
+    Tokens.Keyword KeywordInt -> return $ Just ()
+    Tokens.Keyword KeywordVoid -> return $ Just ()
+    _ -> return Nothing
 
 
 parseStatement :: MaybeParser Statement
 parseStatement = do
-  source@(SourceToken nextToken _) <- peekNextToken
+  SourceToken nextToken _ <- peekNextToken
   case nextToken of
     Tokens.Semicolon -> tossNextToken >> return NullStatement
     Tokens.OpenBrace -> parseCompoundStatement
@@ -291,6 +384,7 @@ parseStatement = do
       expr <- parseExpression
       expectToken Tokens.Semicolon
       return $ ExpressionStatement expr
+
 
 parseSwitchStatement :: MaybeParser Statement
 parseSwitchStatement = do
@@ -386,7 +480,7 @@ parseForStatement = do
     parseForInit = do
       SourceToken token _ <- peekNextToken
       case token of
-        Tokens.Semicolon -> return ForInitEmpty
+        Tokens.Semicolon -> tossNextToken >> return ForInitEmpty
         Tokens.Keyword KeywordInt -> ForInitDeclaration <$> parseDeclaration
         _ -> ForInitExpression <$> parseExpression
 
@@ -545,6 +639,7 @@ parseFactor = do
       let var = VariableExpression name
       let makeUnary op = tossNextToken >> return (UnaryExpression op var)
       case token2 of
+        Tokens.OpenParen -> parseFunctionCallExpression name
         Tokens.Increment -> makeUnary PostfixIncrement
         Tokens.Decrement -> makeUnary PostfixDecrement
         _ -> return var
@@ -553,6 +648,24 @@ parseFactor = do
       let message = "unexpected token \"" ++ show x ++ "\" (parseFactor)"
       tell [ParserError {message=message, token=source}]
       MaybeT . return $ Nothing
+
+
+parseFunctionCallExpression :: Identifier -> MaybeParser Expression
+parseFunctionCallExpression name = do
+  expectToken Tokens.OpenParen
+  args <- go []
+  expectToken Tokens.CloseParen
+  return $ FunctionCallExpression name args
+  where
+    go :: [Expression] -> MaybeParser [Expression]
+    go args = do
+      SourceToken token _ <- peekNextToken
+      case token of
+        Tokens.CloseParen -> return args
+        _ -> do
+          arg <- parseExpression
+          expectCommaOrCloseParen
+          go (args ++ [arg])
 
 
 parseUnaryExpression :: UnaryOperator -> MaybeParser Expression

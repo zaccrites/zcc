@@ -26,13 +26,12 @@ class AstPrintNode a where
 
 instance AstPrintNode Program where
   getAstNodeDescription (Program _) = "Program"
-  getAstSubnodeLines (Program func) = printAstNode func
+  getAstSubnodeLines (Program decls) = concat <$> mapM printAstNode decls
 
 
-instance AstPrintNode FuncDef where
-  getAstNodeDescription (FuncDef name _) = "Function : int " ++ name
-  getAstSubnodeLines (FuncDef _ items) = concat <$> mapM printAstNode items
-
+instance AstPrintNode Block where
+  getAstNodeDescription _ = "Block"
+  getAstSubnodeLines items = concat <$> mapM printAstNode items
 
 instance AstPrintNode BlockItem where
   getAstNodeDescription (BlockItemStatement stmt) = getAstNodeDescription stmt
@@ -45,10 +44,28 @@ instance AstPrintNode BlockItem where
 
 
 instance AstPrintNode Declaration where
-  getAstNodeDescription (VariableDeclaration name _) =
-    "VariableDeclaration : int '" ++ name ++ "'"
-  getAstSubnodeLines (VariableDeclaration _ initExpr) =
+  getAstNodeDescription (VariableDeclaration linkage name _) =
+    "VariableDeclaration : '" ++ name ++ "'"
+  getAstNodeDescription (FunctionDeclaration linkage name params _) =
+    let paramCount = makeCountString "param" "params" params
+    in "FunctionDeclaration : '" ++ name ++ "' (" ++ paramCount ++ ")"
+
+  getAstSubnodeLines (VariableDeclaration linkage _ initExpr) =
     maybe (return []) printAstNode initExpr
+
+  getAstSubnodeLines (FunctionDeclaration _ _ params block) = do
+    paramsLines <- concat <$> mapM printAstNode params
+    blockLines <- fromMaybe [] <$> traverse printAstNode block
+    return $ paramsLines ++ blockLines
+
+
+instance AstPrintNode FunctionParameter where
+  getAstNodeDescription (FunctionParameter name) = "FunctionParameter : '" ++ name ++ "'"
+
+
+makeCountString :: String -> String -> [a] -> String
+makeCountString singular _ [_] = "1 " ++ singular
+makeCountString _ plural items = let count = show . length $ items in count ++ " " ++ plural
 
 
 instance AstPrintNode Statement where
@@ -151,6 +168,7 @@ instance AstPrintNode Expression where
   getAstNodeDescription (VariableExpression name) = "VariableExpression : '" ++ name ++ "'"
   getAstNodeDescription (ConstantExpression value) = "ConstantExpression : " ++ show value
   getAstNodeDescription (ConditionalExpression {}) = "ConditionalExpression"
+  getAstNodeDescription (FunctionCallExpression name _) = "FunctionCallExpression : '" ++ name ++ "'"
 
   getAstSubnodeLines (UnaryExpression _ expr) = printAstNode expr
   getAstSubnodeLines (BinaryExpression _ left right) = do
@@ -162,6 +180,7 @@ instance AstPrintNode Expression where
     ifTrueLines <- printAstNode ifTrue
     ifFalseLines <- printAstNode ifFalse
     return $ concat [condLines, ifTrueLines, ifFalseLines]
+  getAstSubnodeLines (FunctionCallExpression _ args) = concat <$> mapM printAstNode args
   getAstSubnodeLines _ = return []
 
 

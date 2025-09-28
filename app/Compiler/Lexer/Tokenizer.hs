@@ -45,7 +45,7 @@ consumeSpacesAndComments = do
 getNextToken :: Lexer (Maybe SourceToken)
 getNextToken = do
   consumeSpacesAndComments
-  LexerState { location=location } <- get
+  -- LexerState { location=location } <- get
 
   nextChar <- peekNextChar
   case nextChar of
@@ -59,6 +59,7 @@ getNextToken = do
       '~' -> give' Tilde
       '?' -> give' QuestionMark
       ':' -> give' Colon
+      ',' -> give' Comma
       '+' -> tossNextChar >> readPlusToken >>= give
       '-' -> tossNextChar >> readMinusToken >>= give
       '*' -> tossNextChar >> ifNextCharMatches '=' AsteriskAssign Asterisk >>= give
